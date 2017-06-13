@@ -4,6 +4,7 @@
     wack/3,         % ?Owner:atom, ?Repo:atom, ?Version:compound
     wack_install/2, % +Owner:atom, +Repo:atom
     wack_install/3, % +Owner:atom, +Repo:atom, +Version:compound
+    wack_remove/1,  % +Repo:atom
     wack_update/2,  % +Owner:atom, +Repo:atom
     wack_version/3  % +Owner:atom, +Repo:atom, -Version:compound
   ]
@@ -57,23 +58,12 @@ version(version(Major,Minor,Patch)) -->
 % Enumerates currently installed WACKs and shows their version.
 
 wack(Owner, Repo, Version) :-
-  wack_file(WackFile),
-  setup_call_cleanup(
-    open(WackFile, read, In),
-    json_read_dict(In, Dict, []),
-    close(In)
-  ),
-  _{name: Repo, owner: Owner} :< Dict.repository,
-  atom_codes(Dict.version, Codes),
+  wack0(_, WackDict),
+  _{name: Repo, owner: Owner} :< WackDict.repository,
+  atom_codes(WackDict.version, Codes),
   phrase(version(Version), Codes).
 
-
-
-%! wack_file(-WackFile:atom) is nondet.
-%
-% Enuemrated WACK files of currently installed WACKs.
-
-wack_file(WackFile) :-
+wack0(WackDir, WackDict) :-
   pack_dir(PackDir),
   directory_path(PackDir, WackDir),
   absolute_file_name(
@@ -86,6 +76,11 @@ wack_file(WackFile) :-
       relative_to(WackDir),
       solutions(all)
     ]
+  ),
+  setup_call_cleanup(
+    open(WackFile, read, In),
+    json_read_dict(In, WackDict, []),
+    close(In)
   ).
 
 
@@ -113,6 +108,16 @@ wack_install(Owner, Repo, Version) :-
     "Successfully installed ~a's ‘~a’, version ~d.~d.~d\n",
     [Owner,Repo|T]
   ).
+
+
+
+%! wack_remove(+Repo:atom) is det.
+
+wack_remove(Repo) :-
+  wack0(WackDir, WackDict),
+  Repo = WackDict.name, !,
+  delete_directory(WackDir),
+  format(user_output, "Deleted ‘~a’.", [Repo]).
 
 
 
