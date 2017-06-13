@@ -97,13 +97,8 @@ wack_file(WackFile) :-
 % specified.
 
 wack_install(Owner, Repo) :-
-  aggregate_all(
-    set(Version),
-    wack_version(Owner, Repo, Version),
-    Versions
-  ),
-  reverse(Versions, [Version|_]),
-  wack_install(Owner, Repo, Version).
+  wack_version_latest(Owner, Repo, LatestVersion),
+  wack_install(Owner, Repo, LatestVersion).
 
 
 wack_install(Owner, Repo, Version) :-
@@ -111,7 +106,13 @@ wack_install(Owner, Repo, Version) :-
   atom_codes(Tag, Codes),
   atomic_list_concat(['',Owner,Repo], /, Path),
   uri_components(Uri, uri_components(https,'github.com',Path,_,_)),
-  git([clone,Uri,'--branch',Tag,'--depth',1]).
+  git([clone,Uri,'--branch',Tag,'--depth',1]),
+  Version =.. [version|T],
+  format(
+    user_output,
+    "Successfully installed ~a's ‘~a’, version ~d.~d.~d\n",
+    [Owner,Repo|T]
+  ).
 
 
 
@@ -120,8 +121,19 @@ wack_install(Owner, Repo, Version) :-
 % Updates an exisiting WACK
 
 wack_update(Owner, Repo) :-
-  wack_version(Owner, Repo, Version),
-  writeln(Version).
+  wack(Owner, Repo, CurrentVersion),
+  wack_version_latest(Owner, Repo, LatestVersion),
+  (   CurrentVersion == LatestVersion
+  ->  format(user_output, "No need to update.\n")
+  ;   wack_remove(Repo),
+      wack_install(Owner, Repo, LatestVersion),
+      LatestVersion =.. [version|T],
+      format(
+	user_output,
+	"Updated ~a's ‘~a’ to version ~d.~d.~d\n",
+	[Owner,Repo|T]
+      )
+  ).
 
 
 
@@ -129,6 +141,19 @@ wack_update(Owner, Repo) :-
 
 wack_version(Owner, Repo, Version) :-
   github_version(Owner, Repo, Version).
+
+
+
+%! wack_version_latest(+Owner:atom, +Repo:atom,
+%!                     -LatestVersion:compound) is det.
+
+wack_version_latest(Owner, Repo, LatestVersion) :-
+  aggregate_all(
+    set(Version),
+    wack_version(Owner, Repo, Version),
+    Versions
+  ),
+  reverse(Versions, [LatestVersion|_]).
 
 
 
