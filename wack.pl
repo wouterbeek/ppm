@@ -12,7 +12,7 @@
 
 /** <module> WACK (Wouter pACK)
 
-A super simple SWI-Prolog Pack alternative.
+A super simple alternative to SWI-Prolog Packs.
 
 @author Wouter Beek
 @version 2017/06
