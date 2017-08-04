@@ -1,11 +1,10 @@
 :- module(
   'WACK',
   [
-    wack_install/2, % +Owner:atom, +Repo:atom
-    wack_install/3, % +Owner:atom, +Repo:atom, +Version:compound
+    wack_install/2, % +Owner, +Repo
     wack_ls/0,
-    wack_remove/1,  % +Repo:atom
-    wack_update/2,  % +Owner:atom, +Repo:atom
+    wack_remove/1,  % +Repo
+    wack_update/2,  % +Owner, +Repo
     wack_updates/0
   ]
 ).
@@ -82,7 +81,6 @@ wack_ls_row(Owner, Repo, Version) :-
 
 
 %! wack_install(+Owner:atom, +Repo:atom) is semidet.
-%! wack_install(+Owner:atom, +Repo:atom, +Version:compound) is semidet.
 %
 % Installs a WACK.  The latests version is chosen in case none is
 % specified.
@@ -95,10 +93,6 @@ wack_install(Owner, Repo) :-
   format("Use wack_update/2 to update a package.\n").
 wack_install(Owner, Repo) :-
   wack_version_latest(Owner, Repo, LatestVersion),
-  wack_install(Owner, Repo, LatestVersion).
-
-
-wack_install(Owner, Repo, Version) :-
   phrase(version(Version), Codes),
   atom_codes(Tag, Codes),
   atomic_list_concat(['',Owner,Repo], /, Path),
@@ -106,7 +100,7 @@ wack_install(Owner, Repo, Version) :-
   git([clone,Uri,'--branch',Tag,'--depth',1]),
   Version =.. [version|T],
   format("Successfully installed ~a's ‘~a’, version ~d.~d.~d\n",
-        [Owner,Repo|T]).
+         [Owner,Repo|T]).
 
 
 
