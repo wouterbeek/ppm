@@ -76,9 +76,11 @@ wack_install(User, Repo, Kind) :-
   github_version_latest(User, Repo, Version),
   github_install(User, Repo, Version),
   repo_conf(Repo, Conf),
-  _{dependencies: Deps1} :< Conf,
-  collect_dependencies(Deps1, Deps2),
-  maplist(wack_install_dependency, Deps2),
+  (   _{dependencies: Deps1} :< Conf
+  ->  collect_dependencies(Deps1, Deps2),
+      maplist(wack_install_dependency, Deps2)
+  ;   true
+  ),
   phrase(version(Version), Codes),
   format("Successfully installed ~a ‘~a’, version ~s\n", [Kind,Repo,Codes]).
 
@@ -95,11 +97,11 @@ wack_install_dependency(Dep) :-
 % TBD: Also remove packages that depend on the removed package.
 
 wack_remove(Repo) :-
-  repo_conf(Repo, Conf),
-  Repo = Conf.name, !,
+  wack_current(_, Repo, Version),
   repo_dir(Repo, RepoDir),
   delete_directory_and_contents(RepoDir),
-  format("Deleted package ‘~a’.", [Repo]).
+  phrase(version(Version), Codes),
+  format("Deleted package ‘~a’ (version ~s).", [Repo,Codes]).
 
 
 
@@ -118,8 +120,9 @@ wack_update(Repo) :-
   ->  format("No need to update.\n")
   ;   wack_remove(Repo),
       wack_install(User, Repo),
-      LatestVersion =.. [version|T],
-      format("Updated ~a's ‘~a’ to version ~d.~d.~d\n", [User,Repo|T])
+      phrase(version(CurrentVersion), Codes1),
+      phrase(version(LatestVersion), Codes2),
+      format("Updated ‘~a’: ~s → ~s\n", [Repo,Codes1,Codes2])
   ).
 
 
@@ -252,7 +255,8 @@ github_version(User, Repo, Version) :-
 
 github_version_latest(User, Repo, LatestVersion) :-
   aggregate_all(set(Version), github_version(User, Repo, Version), Versions),
-  predsort(compare_version, Versions, [LatestVersion|_]).
+  predsort(compare_version, Versions, SortedVersions),
+  last(SortedVersions, LatestVersion).
 
 
 
@@ -352,7 +356,7 @@ repo_conf(Repo, Conf) :-
 
 
 
-%! repo_dir(+Repo:atom, -Dir:atom) is det.
+%! repo_dir(+Repo:atom, -Dir:atom) is semidet.
 %! repo_dir(-Repo:atom, -Dir:atom) is nondet.
 
 repo_dir(Repo, RepoDir) :-
@@ -360,6 +364,10 @@ repo_dir(Repo, RepoDir) :-
   (   var(Repo)
   ->  directory_path(PackDir, RepoDir)
   ;   directory_file_path(PackDir, Repo, RepoDir),
-      absolute_file_name(RepoDir, _, [access(read),file_type(directory)])
+      absolute_file_name(
+        RepoDir,
+        _,
+        [access(read),file_errors(fail),file_type(directory)]
+      )
   ),
   is_git_directory(RepoDir).
