@@ -1,7 +1,7 @@
 :- module(
   'WACK',
   [
-    wack_install/2, % +Owner, +Name
+    wack_install/2, % +User, +Name
     wack_ls/0,
     wack_remove/1,  % +Name
     wack_update/1,  % +Name
@@ -18,133 +18,129 @@
 :- use_module(library(ansi_term)).
 :- use_module(library(apply)).
 :- use_module(library(dcg/basics)).
-:- use_module(library(error)).
 :- use_module(library(filesex)).
 :- use_module(library(git)).
 :- use_module(library(http/http_open)).
 :- use_module(library(http/json)).
 :- use_module(library(lists)).
-:- use_module(library(process)).
-:- use_module(library(readutil)).
 :- use_module(library(uri)).
 
 
 
 
 
-%! wack(?Owner:atom, ?Name:atom, ?Version:compound) is nondet.
+%! wack_current(?User:atom, ?Name:atom, ?Version:compound) is nondet.
 %
 % Enumerates currently installed WACKs together with their semantic
 % version.
 
-wack(Owner, Repo, Version) :-
+wack_current(User, Repo, Version) :-
   repo_dir(Repo, RepoDir),
-  github_info(RepoDir, Owner, Repo, Version).
+  github_info(RepoDir, User, Repo, Version).
 
 
 
 %! wack_ls is det.
 %
 % Display all currently installed WACKs.
+%
+% TBD Display which packages a package is a dependency for.
 
 wack_ls :-
   forall(
-    wack(Owner, Repo, Version),
-    wack_ls_row(Owner, Repo, Version)
+    wack_current(User, Repo, Version),
+    wack_ls_row(User, Repo, Version)
   ).
 
-wack_ls_row(Owner, Repo, Version) :-
+wack_ls_row(User, Repo, Version) :-
   phrase(version(Version), Codes),
-  format("~a\t~a\t~s\n", [Owner,Repo,Codes]).
+  format("~a\t~a\t~s\n", [User,Repo,Codes]).
 
 
 
-%! wack_install(+Conf:dict) is semidet.
-%! wack_install(+Owner:atom, +Repo:atom) is semidet.
+%! wack_install(+User:atom, +Repo:atom) is semidet.
 %
 % Installs a WACK.  The latests version is chosen in case none is
 % specified.
 
-wack_install(Dict) :-
-  _{name: Repo, owner: Owner} :< Dict,
-  wack_install(Owner, Repo).
-
-
-wack_install(Owner, Repo) :-
-  wack(Owner, Repo, CurrentVersion), !,
+wack_install(User, Repo) :-
+  wack_current(User, Repo, CurrentVersion), !,
   phrase(version(CurrentVersion), Codes),
   format("Package ~a's ‘~a’ is already installed (version ~s)\n",
-         [Owner,Repo,Codes]),
+         [User,Repo,Codes]),
   format("Use wack_update/1 to update a package.\n").
-wack_install(Owner, Repo) :-
-  wack_version_latest(Owner, Repo, Version),
-  phrase(version(Version), Codes),
-  atom_codes(Tag, Codes),
-  atomic_list_concat(['',Owner,Repo], /, Path),
-  uri_components(Uri, uri_components(https,'github.com',Path,_,_)),
-  pack_dir(PackDir),
-  git([clone,Uri,'--branch',Tag,'--depth',1], [directory(PackDir)]),
+wack_install(User, Repo) :-
+  wack_install(User, Repo, package).
+
+wack_install(User, Repo, Kind) :-
+  github_version_latest(User, Repo, Version),
+  github_install(User, Repo, Version),
   repo_conf(Repo, Conf),
   _{dependencies: Deps1} :< Conf,
   collect_dependencies(Deps1, Deps2),
-  maplist(wack_install, Deps2),
+  maplist(wack_install_dependency, Deps2),
   phrase(version(Version), Codes),
-  format("Successfully installed ~a's ‘~a’, version ~s\n",
-         [Owner,Repo,Codes]).
+  format("Successfully installed ~a ‘~a’, version ~s\n", [Kind,Repo,Codes]).
+
+wack_install_dependency(Dep) :-
+  _{repo: Repo, user: User} :< Dep,
+  wack_install(User, Repo, dependency).
 
 
 
 %! wack_remove(+Name:atom) is det.
 %
 % Removes a WACK.
+%
+% TBD: Also remove packages that depend on the removed package.
 
 wack_remove(Repo) :-
   repo_conf(Repo, Conf),
   Repo = Conf.name, !,
   repo_dir(Repo, RepoDir),
   delete_directory_and_contents(RepoDir),
-  format(user_output, "Deleted package ‘~a’.", [Repo]).
+  format("Deleted package ‘~a’.", [Repo]).
 
 
 
 %! wack_update(+Name:atom) is semidet.
 %
 % Updates an exisiting WACK.
+%
+% TBD: Also update packages that are dependencies.
+%
+% TBD: Also install new dependencies.
 
 wack_update(Repo) :-
-  wack(Owner, Repo, CurrentVersion),
-  wack_version_latest(Owner, Repo, LatestVersion),
+  wack_current(User, Repo, CurrentVersion),
+  github_version_latest(User, Repo, LatestVersion),
   (   CurrentVersion == LatestVersion
-  ->  format(user_output, "No need to update.\n")
+  ->  format("No need to update.\n")
   ;   wack_remove(Repo),
-      wack_install(Owner, Repo, LatestVersion),
+      wack_install(User, Repo),
       LatestVersion =.. [version|T],
-      format(
-        user_output,
-        "Updated ~a's ‘~a’ to version ~d.~d.~d\n",
-	      [Owner,Repo|T]
-      )
+      format("Updated ~a's ‘~a’ to version ~d.~d.~d\n", [User,Repo|T])
   ).
 
 
 
 %! wack_updates is det.
 %
-% Shows packages, if any, that can be updated using wack_update/2.
+% Shows packages, if any, that can be updated using wack_update/1.
 
 wack_updates :-
   forall(
-    wack(Owner, Repo, CurrentVersion),
+    wack_current(User, Repo, CurrentVersion),
     (
-      wack_version_latest(Owner, Repo, LatestVersion),
+      github_version_latest(User, Repo, LatestVersion),
       compare_version(Order, CurrentVersion, LatestVersion),
-      wack_updates_row(Owner, Repo, Order, CurrentVersion, LatestVersion)
+      wack_updates_row(User, Repo, Order, CurrentVersion, LatestVersion)
     )
   ).
 
 wack_updates_row(_, _, =, _, _) :- !.
-wack_updates_row(Owner, Repo, Order, CurrentVersion, LatestVersion) :-
-  format("~a\t~a\t", [Owner,Repo]),
+wack_updates_row(User, Repo, Order, CurrentVersion, LatestVersion) :-
+  format("~a\t~a\t", [User,Repo]),
   order_colors(Order, Color1, Color2),
   phrase(version(CurrentVersion), CurrentCodes),
   ansi_format([fg(Color1)], "~s", [CurrentCodes]),
@@ -154,26 +150,6 @@ wack_updates_row(Owner, Repo, Order, CurrentVersion, LatestVersion) :-
 
 order_colors(<, red, green).
 order_colors(>, green, red).
-
-
-
-%! wack_version(+Owner:atom, +Repo:atom, -Version:compound) is nondet.
-
-wack_version(Owner, Repo, Version) :-
-  github_version(Owner, Repo, Version).
-
-
-
-%! wack_version_latest(+Owner:atom, +Repo:atom,
-%!                     -LatestVersion:compound) is det.
-
-wack_version_latest(Owner, Repo, LatestVersion) :-
-  aggregate_all(
-    set(Version),
-    wack_version(Owner, Repo, Version),
-    Versions
-  ),
-  reverse(Versions, [LatestVersion|_]).
 
 
 
@@ -219,16 +195,29 @@ version(version(Major,Minor,Patch)) -->
 
 % SERVICE: GITHUB %
 
-%! github_info(+Dir:atom, -Owner:atom, -Repo:atom, -Version:compound) is det.
+%! github_info(+Dir:atom, -User:atom, -Repo:atom, -Version:compound) is det.
 
-github_info(Dir, Owner, Repo, Version) :-
+github_info(Dir, User, Repo, Version) :-
   git([config,'--get','remote.origin.url'], [directory(Dir),output(Codes1)]),
   atom_codes(Atom1, Codes1),
   atom_concat(Uri, '\n', Atom1),
   uri_components(Uri, uri_components(https,'github.com',Path,_,_)),
-  atomic_list_concat(['',Owner,Repo], /, Path),
+  atomic_list_concat(['',User,Repo], /, Path),
   git([describe,'--tags'], [directory(Dir),output(Codes2)]),
   phrase(version(Version), Codes2, _Rest).
+
+
+
+%! github_install(+User:atom, +Repo:atom, +Version:compound) is det.
+
+github_install(User, Repo, Version) :-
+  phrase(version(Version), Codes),
+  atom_codes(Tag, Codes),
+  atomic_list_concat(['',User,Repo], /, Path),
+  uri_components(Uri, uri_components(https,'github.com',Path,_,_)),
+  pack_dir(PackDir),
+  git([clone,Uri,'--branch',Tag,'--depth',1], [directory(PackDir)]).
+
 
 
 %! github_open(+Segments:list(atom), -In:stream) is det.
@@ -244,10 +233,10 @@ github_open(Segments, In) :-
 
 
 
-%! github_version(+Owner:atom, +Repo:atom, -Version:compound) is nondet.
+%! github_version(+User:atom, +Repo:atom, -Version:compound) is nondet.
 
-github_version(Owner, Repo, Version) :-
-  github_open([repos,Owner,Repo,tags], In),
+github_version(User, Repo, Version) :-
+  github_open([repos,User,Repo,tags], In),
   call_cleanup(
     json_read_dict(In, Tags, [value_string_as(atom)]),
     close(In)
@@ -255,6 +244,15 @@ github_version(Owner, Repo, Version) :-
   member(Tag, Tags),
   atom_codes(Tag.name, Codes),
   phrase(version(Version), Codes).
+
+
+
+%! github_version_latest(+User:atom, +Repo:atom,
+%!                       -LatestVersion:compound) is det.
+
+github_version_latest(User, Repo, LatestVersion) :-
+  aggregate_all(set(Version), github_version(User, Repo, Version), Versions),
+  predsort(compare_version, Versions, [LatestVersion|_]).
 
 
 
