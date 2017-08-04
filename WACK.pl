@@ -1,10 +1,10 @@
 :- module(
   'WACK',
   [
-    wack_install/2, % +Owner, +Repo
+    wack_install/2, % +Owner, +Name
     wack_ls/0,
-    wack_remove/1,  % +Repo
-    wack_update/2,  % +Owner, +Repo
+    wack_remove/1,  % +Name
+    wack_update/1,  % +Name
     wack_updates/0
   ]
 ).
@@ -32,7 +32,7 @@
 
 
 
-%! wack(?Owner:atom, ?Repo:atom, ?Version:compound) is nondet.
+%! wack(?Owner:atom, ?Name:atom, ?Version:compound) is nondet.
 %
 % Enumerates currently installed WACKs together with their semantic
 % version.
@@ -75,7 +75,7 @@ wack_install(Owner, Repo) :-
   phrase(version(CurrentVersion), Codes),
   format("Package ~a's ‘~a’ is already installed (version ~s)\n",
          [Owner,Repo,Codes]),
-  format("Use wack_update/2 to update a package.\n").
+  format("Use wack_update/1 to update a package.\n").
 wack_install(Owner, Repo) :-
   wack_version_latest(Owner, Repo, Version),
   phrase(version(Version), Codes),
@@ -94,22 +94,24 @@ wack_install(Owner, Repo) :-
 
 
 
-%! wack_remove(+Repo:atom) is det.
+%! wack_remove(+Name:atom) is det.
+%
+% Removes a WACK.
 
 wack_remove(Repo) :-
   repo_conf(Repo, Conf),
   Repo = Conf.name, !,
   repo_dir(Repo, RepoDir),
-  delete_directory(RepoDir),
-  format(user_output, "Deleted ‘~a’.", [Repo]).
+  delete_directory_and_contents(RepoDir),
+  format(user_output, "Deleted package ‘~a’.", [Repo]).
 
 
 
-%! wack_update(+Owner:atom, +Repo:atom) is semidet.
+%! wack_update(+Name:atom) is semidet.
 %
 % Updates an exisiting WACK.
 
-wack_update(Owner, Repo) :-
+wack_update(Repo) :-
   wack(Owner, Repo, CurrentVersion),
   wack_version_latest(Owner, Repo, LatestVersion),
   (   CurrentVersion == LatestVersion
@@ -328,32 +330,6 @@ pack_dir(PackDir) :-
 
 
 
-%! print_error(+Err:stream) is det.
-
-print_error(Err) :-
-  repeat,
-  read_stream_to_codes(Err, Codes, []),
-  (   Codes == end_of_file
-  ->  !
-  ;   string_codes(String, Codes),
-      split_string(String, "\n", "", Strings),
-      exclude(==(""), Strings, NonEmptyStrings),
-      maplist(print_message(warning), NonEmptyStrings)
-  ),
-  fail.
-
-
-
-%! print_status(+Status) is det.
-
-print_status(0) :- !.
-print_status(exit(Status)) :- !,
-  print_status(Status).
-print_status(Status) :-
-  print_message(warning, status(Status)).
-
-
-
 %! repo_conf(+Repo:atom, -Conf:dict) is det.
 %! repo_conf(-Repo:atom, -Conf:dict) is nondet.
 
@@ -385,6 +361,7 @@ repo_dir(Repo, RepoDir) :-
   pack_dir(PackDir),
   (   var(Repo)
   ->  directory_path(PackDir, RepoDir)
-  ;   directory_file_path(PackDir, Repo, RepoDir)
+  ;   directory_file_path(PackDir, Repo, RepoDir),
+      absolute_file_name(RepoDir, _, [access(read),file_type(directory)])
   ),
   is_git_directory(RepoDir).
