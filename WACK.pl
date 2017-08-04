@@ -54,7 +54,13 @@ wack_ls :-
 
 wack_ls_row(User, Repo, Version) :-
   phrase(version(Version), Codes),
-  format("~a\t~a\t~s\n", [User,Repo,Codes]).
+  format("~a\t~a\t~s\n", [User,Repo,Codes]),
+  repo_deps(Repo, Deps),
+  maplist(wack_ls_dep_row, Deps).
+
+wack_ls_dep_row(Dep) :-
+  get_dict(repo, Dep, Repo),
+  format("\t→ ~a\n", [Repo]).
 
 
 
@@ -75,12 +81,9 @@ wack_install(User, Repo) :-
 wack_install(User, Repo, Kind) :-
   github_version_latest(User, Repo, Version),
   github_install(User, Repo, Version),
-  repo_conf(Repo, Conf),
-  (   _{dependencies: Deps1} :< Conf
-  ->  collect_dependencies(Deps1, Deps2),
-      maplist(wack_install_dependency, Deps2)
-  ;   true
-  ),
+  repo_deps(Repo, Deps1),
+  collect_deps(Deps1, Deps2),
+  maplist(wack_install_dependency, Deps2),
   phrase(version(Version), Codes),
   format("Successfully installed ~a ‘~a’, version ~s\n", [Kind,Repo,Codes]).
 
@@ -264,23 +267,23 @@ github_version_latest(User, Repo, LatestVersion) :-
 
 % HELPERS %
 
-%! collect_dependencies(+Deps1:list(dict), -Deps2:list(dict)) is det.
+%! collect_deps(+Deps1:list(dict), -Deps2:list(dict)) is det.
 
-collect_dependencies(L1, L2) :-
-  collect_dependencies(L1, [], L2).
+collect_deps(L1, L2) :-
+  collect_deps(L1, [], L2).
 
 
-collect_dependencies([], L, L) :- !.
-collect_dependencies([H|T1], T2, L) :-
+collect_deps([], L, L) :- !.
+collect_deps([H|T1], T2, L) :-
   get_dict(name, H, Repo),
   repo_dir(Repo, RepoDir),
   exists_directory(RepoDir), !,
-  collect_dependencies(T1, T2, L).
-collect_dependencies([H|T1], T2, L) :-
+  collect_deps(T1, T2, L).
+collect_deps([H|T1], T2, L) :-
   \+ memberchk(H, T2), !,
-  collect_dependencies(T1, [H|T2], L).
-collect_dependencies([_|T1], T2, L) :-
-  collect_dependencies(T1, T2, L).
+  collect_deps(T1, [H|T2], L).
+collect_deps([_|T1], T2, L) :-
+  collect_deps(T1, T2, L).
 
 
 
@@ -306,6 +309,14 @@ directory_file(Dir, File) :-
 directory_path(Dir, Path) :-
   directory_file(Dir, File),
   directory_file_path(Dir, File, Path).
+
+
+
+%! get_dict(?Key, +Dict, +Default, -Value) is det.
+
+get_dict(Key, Dict, _, Value) :-
+  get_dict(Key, Dict, Value).
+get_dict(_, _, Value, Value).
 
 
 
@@ -353,6 +364,14 @@ repo_conf(Repo, Conf) :-
     json_read_dict(In, Conf, [value_string_as(atom)]),
     close(In)
   ).
+
+
+
+%! repo_deps(+Repo:atom, -Deps:list(dict)) is det.
+
+repo_deps(Repo, Deps) :-
+  repo_conf(Repo, Conf),
+  get_dict(dependencies, Conf, [], Deps).
 
 
 
