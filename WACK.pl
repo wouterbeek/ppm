@@ -18,6 +18,7 @@
 :- use_module(library(ansi_term)).
 :- use_module(library(apply)).
 :- use_module(library(dcg/basics)).
+:- use_module(library(error)).
 :- use_module(library(filesex)).
 :- use_module(library(git)).
 :- use_module(library(http/http_open)).
@@ -29,7 +30,7 @@
 
 
 
-  
+
 
 %! wack(?Owner:atom, ?Repo:atom, ?Version:compound) is nondet.
 %
@@ -37,30 +38,8 @@
 % version.
 
 wack(Owner, Repo, Version) :-
-  wack0(_, WackDict),
-  _{name: Repo, owner: Owner} :< WackDict.repository,
-  atom_codes(WackDict.version, Codes),
-  phrase(version(Version), Codes).
-
-wack0(WackDir, WackDict) :-
-  pack_dir(PackDir),
-  directory_path(PackDir, WackDir),
-  absolute_file_name(
-    wack,
-    WackFile,
-    [
-      access(read),
-      extensions([json]),
-      file_errors(fail),
-      relative_to(WackDir),
-      solutions(all)
-    ]
-  ),
-  setup_call_cleanup(
-    open(WackFile, read, In),
-    json_read_dict(In, WackDict, []),
-    close(In)
-  ).
+  repo_dir(Repo, RepoDir),
+  github_info(RepoDir, Owner, Repo, Version).
 
 
 
@@ -76,14 +55,20 @@ wack_ls :-
 
 wack_ls_row(Owner, Repo, Version) :-
   phrase(version(Version), Codes),
-  format("~a\t~a\t~s", [Owner,Repo,Codes]).
+  format("~a\t~a\t~s\n", [Owner,Repo,Codes]).
 
 
 
+%! wack_install(+Conf:dict) is semidet.
 %! wack_install(+Owner:atom, +Repo:atom) is semidet.
 %
 % Installs a WACK.  The latests version is chosen in case none is
 % specified.
+
+wack_install(Dict) :-
+  _{name: Repo, owner: Owner} :< Dict,
+  wack_install(Owner, Repo).
+
 
 wack_install(Owner, Repo) :-
   wack(Owner, Repo, CurrentVersion), !,
@@ -92,24 +77,30 @@ wack_install(Owner, Repo) :-
          [Owner,Repo,Codes]),
   format("Use wack_update/2 to update a package.\n").
 wack_install(Owner, Repo) :-
-  wack_version_latest(Owner, Repo, LatestVersion),
+  wack_version_latest(Owner, Repo, Version),
   phrase(version(Version), Codes),
   atom_codes(Tag, Codes),
   atomic_list_concat(['',Owner,Repo], /, Path),
   uri_components(Uri, uri_components(https,'github.com',Path,_,_)),
-  git([clone,Uri,'--branch',Tag,'--depth',1]),
-  Version =.. [version|T],
-  format("Successfully installed ~a's ‘~a’, version ~d.~d.~d\n",
-         [Owner,Repo|T]).
+  pack_dir(PackDir),
+  git([clone,Uri,'--branch',Tag,'--depth',1], [directory(PackDir)]),
+  repo_conf(Repo, Conf),
+  _{dependencies: Deps1} :< Conf,
+  collect_dependencies(Deps1, Deps2),
+  maplist(wack_install, Deps2),
+  phrase(version(Version), Codes),
+  format("Successfully installed ~a's ‘~a’, version ~s\n",
+         [Owner,Repo,Codes]).
 
 
 
 %! wack_remove(+Repo:atom) is det.
 
 wack_remove(Repo) :-
-  wack0(WackDir, WackDict),
-  Repo = WackDict.name, !,
-  delete_directory(WackDir),
+  repo_conf(Repo, Conf),
+  Repo = Conf.name, !,
+  repo_dir(Repo, RepoDir),
+  delete_directory(RepoDir),
   format(user_output, "Deleted ‘~a’.", [Repo]).
 
 
@@ -186,7 +177,57 @@ wack_version_latest(Owner, Repo, LatestVersion) :-
 
 
 
+% VERSIONS %
+
+%! compare_version(?Order:oneof([<,=,>]), @Version1, @Version2) is det.
+%
+% Determine or test the order between two semantic versions.
+
+compare_version(Order, version(Major1,Minor1,Patch1),
+                version(Major2,Minor2,Patch2)) :-
+  compare(OrderMajor, Major1, Major2),
+  (   OrderMajor == =
+  ->  compare(OrderMinor, Minor1, Minor2),
+      (   OrderMinor == =
+      ->  compare(Order, Patch1, Patch2)
+      ;   Order = OrderMinor
+      )
+  ;   Order = OrderMajor
+  ).
+
+
+
+%! version(?Version:compound)// is det.
+%
+% Parses/generates semantic versioning strings.
+%
+% @arg Version is a compound term of the form `version(int,int,int)'.
+
+version(version(Major,Minor,Patch)) -->
+  "v",
+  integer(Major),
+  ".",
+  integer(Minor),
+  ".",
+  integer(Patch).
+
+
+
+
+
 % SERVICE: GITHUB %
+
+%! github_info(+Dir:atom, -Owner:atom, -Repo:atom, -Version:compound) is det.
+
+github_info(Dir, Owner, Repo, Version) :-
+  git([config,'--get','remote.origin.url'], [directory(Dir),output(Codes1)]),
+  atom_codes(Atom1, Codes1),
+  atom_concat(Uri, '\n', Atom1),
+  uri_components(Uri, uri_components(https,'github.com',Path,_,_)),
+  atomic_list_concat(['',Owner,Repo], /, Path),
+  git([describe,'--tags'], [directory(Dir),output(Codes2)]),
+  phrase(version(Version), Codes2, _Rest).
+
 
 %! github_open(+Segments:list(atom), -In:stream) is det.
 
@@ -217,78 +258,50 @@ github_version(Owner, Repo, Version) :-
 
 
 
-% VC: GIT %
-
-%! git(+Arguments:list(atomic)) is det.
-%
-% Generic Git invocation that takes care of routing content from the
-% output and error streams.
-
-git(Arguments) :-
-  pack_dir(PackDir),
-  git(Arguments, [directory(PackDir)]).
-
-
-
-
-
-% VERSIONS %
-
-%! compare_version(?Order:oneof([<,=,>]), @Version1, @Version2) is det.
-%
-% Determine or test the order between two semantic versions.
-
-compare_version(Order, version(Major1,Minor1,Patch1),
-                version(Major2,Minor2,Patch2)) :-
-  compare(OrderMajor, Major1, Major2),
-  (   OrderMajor == =
-  ->  compare(OrderMinor, Minor1, Minor2),
-      (   OrderMinor == =
-      ->  compare(Order, Patch1, Patch2)
-      ;   Order = OrderMinor
-      )
-  ;   Order = OrderMajor
-  ).
-
-
-
-%! version(?Version:compound)// is det.
-%
-% Parses/generates semantic versioning strings.
-%
-% @arg Version is a compound term of the form `version(int,int,int)'.
-
-version(version(Major,Minor,Patch)) -->
-  version_indicator,
-  integer(Major),
-  ".",
-  integer(Minor),
-  ".",
-  integer(Patch).
-version_indicator --> "v", !.
-version_indicator --> "V".
-
-
-
-
-
 % HELPERS %
 
-%! directory_path(+Directory:atom, -File:atom) is nondet.
+%! collect_dependencies(+Deps1:list(dict), -Deps2:list(dict)) is det.
+
+collect_dependencies(L1, L2) :-
+  collect_dependencies(L1, [], L2).
+
+
+collect_dependencies([], L, L) :- !.
+collect_dependencies([H|T1], T2, L) :-
+  get_dict(name, H, Repo),
+  repo_dir(Repo, RepoDir),
+  exists_directory(RepoDir), !,
+  collect_dependencies(T1, T2, L).
+collect_dependencies([H|T1], T2, L) :-
+  \+ memberchk(H, T2), !,
+  collect_dependencies(T1, [H|T2], L).
+collect_dependencies([_|T1], T2, L) :-
+  collect_dependencies(T1, T2, L).
+
+
+
+%! directory_file(+Dir:atom, -File:atom) is nondet.
+
+directory_file(Dir, File) :-
+  directory_files(Dir, Files),
+  member(File, Files),
+  \+ is_dummy_file(File).
+
+
+
+%! directory_path(+Dir:atom, -File:atom) is nondet.
 %
-% Non-determinisitcally enumerates the Files that are in Directory.
+% Non-determinisitcally enumerates the Files that are in Dir.
 %
-% @arg Directory is an atom denoting a directory on the filesystem.
+% @arg Dir is an atom denoting a directory on the filesystem.
 %
-% @arg File is an atomic full path specifier of a file in Directory.
+% @arg File is an atomic full path specifier of a file in Dir.
 %
 % The dummy files `.' and `..' are not included.
 
-directory_path(Directory, Path) :-
-  directory_files(Directory, Files),
-  member(File, Files),
-  \+ is_dummy_file(File),
-  directory_file_path(Directory, File, Path).
+directory_path(Dir, Path) :-
+  directory_file(Dir, File),
+  directory_file_path(Dir, File, Path).
 
 
 
@@ -338,3 +351,40 @@ print_status(exit(Status)) :- !,
   print_status(Status).
 print_status(Status) :-
   print_message(warning, status(Status)).
+
+
+
+%! repo_conf(+Repo:atom, -Conf:dict) is det.
+%! repo_conf(-Repo:atom, -Conf:dict) is nondet.
+
+repo_conf(Repo, Conf) :-
+  repo_dir(Repo, Dir),
+  absolute_file_name(
+    'WACK',
+    File,
+    [
+      access(read),
+      extensions([json]),
+      file_errors(fail),
+      relative_to(Dir),
+      solutions(all)
+    ]
+  ),
+  setup_call_cleanup(
+    open(File, read, In),
+    json_read_dict(In, Conf, [value_string_as(atom)]),
+    close(In)
+  ).
+
+
+
+%! repo_dir(+Repo:atom, -Dir:atom) is det.
+%! repo_dir(-Repo:atom, -Dir:atom) is nondet.
+
+repo_dir(Repo, RepoDir) :-
+  pack_dir(PackDir),
+  (   var(Repo)
+  ->  directory_path(PackDir, RepoDir)
+  ;   directory_file_path(PackDir, Repo, RepoDir)
+  ),
+  is_git_directory(RepoDir).
