@@ -132,15 +132,15 @@ ppm_list_dep_row(Dep) :-
 %! ppm_publish(+Name:atom, +Version(compound)) is det.
 
 ppm_publish(Repo, LocalVersion) :-
+  repo_dir(Repo, RepoDir),
+  git_remote_uri(RepoDir, Uri),
+  github_uri(Uri, User, Repo),
   % make sure the local version is set as a Git tag
   phrase(version(LocalVersion), Codes),
   atom_codes(Tag, Codes),
-  repo_dir(Repo, RepoDir),
   git_create_tag(RepoDir, Tag),
   % make sure the local version is ahead of the remote version
-  (   git_remote_uri(RepoDir, Uri),
-      github_uri(Uri, User, Repo),
-      github_version_latest(User, Repo, RemoteVersion)
+  (   github_version_latest(User, Repo, RemoteVersion)
   ->  compare_version(Order, LocalVersion, RemoteVersion),
       (   memberchk(Order, [<,=])
       ->  % informational
@@ -156,10 +156,8 @@ ppm_publish(Repo, LocalVersion) :-
       )
   ;   true
   ),
-  % Github authorization
-  github_authorized(User, Password),
   % create the Github release
-  github_create_release(User, Password, Repo, Tag).
+  github_create_release(User, Repo, Tag).
 
 
 
@@ -350,18 +348,6 @@ git_remote_uri(Dir, Uri) :-
 
 % SERVICE: GITHUB %
 
-%! github_authorized(-User:atom, -Password:atom) is semidet.
-
-github_authorized(User, Password) :-
-  ansi_format([fg(yellow)], "Github user name: ", []),
-  read_line_to_codes(user_input, Codes1),
-  ansi_format([fg(yellow)], "Github password: ", []),
-  read_line_to_codes(user_input, Codes2),
-  maplist(atom_codes, [User,Password], [Codes1,Codes2]),
-  github_open_authorized(User, Password, [applications,grants], [], 200), !.
-
-
-
 %! github_clone_version(+User:atom, +Repo:atom, +Version:compound) is det.
 
 github_clone_version(User, Repo, Version) :-
@@ -373,26 +359,14 @@ github_clone_version(User, Repo, Version) :-
 
 
 
-%! github_create_release(+User:atom, +Password:atom, +Repo:atom,
-%!                       +Tag:atom) is det.
+%! github_create_release(+User:atom, +Repo:atom, +Tag:atom) is det.
 
-github_create_release(User, Password, Repo, Tag) :-
+github_create_release(User, Repo, Tag) :-
   github_open_authorized(
-    User,
-    Password,
     [repos,User,Repo,releases],
     [post(json(_{tag_name: Tag}))],
     201
   ).
-
-
-
-%! github_info(+Uri:atom, -User:atom, -Repo:atom) is det.
-
-github_uri(Uri, User, Repo) :-
-  uri_components(Uri, Comps),
-  uri_data(path, Comps, Path),
-  atomic_list_concat(['',User,Repo], /, Path).
 
 
 
@@ -435,13 +409,26 @@ print_http_header(Header) :-
 
 
 
-%! github_open_authorized(+User:atom, +Password:atom, +Segments:list(atom),
-%!                        +Options:list(compound),
+%! github_open_authorized(+Segments:list(atom), +Options:list(compound),
 %!                        +Status:between(100,599)) is det.
 
-github_open_authorized(User, Password, Segments, Options1, Status) :-
+github_open_authorized(Segments, Options1, Status) :-
+  ansi_format([fg(yellow)], "Github user name: ", []),
+  read_line_to_codes(user_input, Codes1),
+  ansi_format([fg(yellow)], "Github password: ", []),
+  read_line_to_codes(user_input, Codes2),
+  maplist(atom_codes, [User,Password], [Codes1,Codes2]),
   merge_options([authorization(basic(User,Password))], Options1, Options2),
   github_open(Segments, Options2, Status).
+
+
+
+%! github_info(+Uri:atom, -User:atom, -Repo:atom) is det.
+
+github_uri(Uri, User, Repo) :-
+  uri_components(Uri, Comps),
+  uri_data(path, Comps, Path),
+  atomic_list_concat(['',User,Repo], /, Path).
 
 
 
@@ -592,7 +579,7 @@ git_tag(Dir, Tag) :-
 
 github_delete_version(User, Repo, Version) :-
   github_version(User, Repo, Version, Id),
-  github_open([repos,User,Repo,releases,Id], [method(delete)], 204).
+  github_open_authorized([repos,User,Repo,releases,Id], [method(delete)], 204).
 
 
 
