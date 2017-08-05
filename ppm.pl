@@ -422,7 +422,7 @@ github_create_release(User, Password, Repo, Tag) :-
 
 %! github_info(+Uri:atom, -User:atom, -Repo:atom) is det.
 
-github_uri(Uri, User, Repo, RepoDir) :-
+github_uri(Uri, User, Repo) :-
   uri_components(Uri, Comps),
   uri_data(path, Comps, Path),
   atomic_list_concat(['',User,Repo], /, Path).
@@ -552,7 +552,7 @@ repo_deps(Repo, Deps) :-
   absolute_file_name(
     ppm,
     File,
-    [access(read),directory(Dir),extensions([json]),file_errors(fail)]
+    [access(read),extensions([json]),file_errors(fail),relative_to(Dir)]
   ),
   setup_call_cleanup(
     open(File, read, In),
