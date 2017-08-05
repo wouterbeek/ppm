@@ -26,9 +26,14 @@ A very simple package manager for SWI-Prolog.
 :- use_module(library(http/http_open)).
 :- use_module(library(http/json)).
 :- use_module(library(lists)).
+:- use_module(library(option)).
 :- use_module(library(ordsets)).
 :- use_module(library(prolog_pack)).
+:- use_module(library(settings)).
 :- use_module(library(uri)).
+
+:- setting(user, any, _, "Github user name").
+:- setting(password, any, _, "Github password").
 
 
 
@@ -112,7 +117,7 @@ ppm_list_dep_row(Dep) :-
 ppm_publish(User, Name, Version) :-
   phrase(version(Version), Codes),
   atom_codes(Tag, Codes),
-  github_create_release(User, Name, Tag),
+  github_create_version(User, Name, Tag),
   file_name_extension(Tag, zip, Local),
   atomic_list_concat(['',User,Name,archive,Local], /, Path),
   uri_components(Uri, uri_components(https,'api.github.com',Path,_,_)),
@@ -255,29 +260,26 @@ github_clone(User, Repo, Version) :-
 
 
 
-%! github_create_release(+User:atom, +Name:atom, +Tag:atom) is det.
+%! github_create_version(+User:atom, +Repo:atom, +Tag:atom) is det.
 
-github_create_release(User, Name, Tag) :-
-  atomic_list_concat(['',repos,User,Name,releases], /, Path),
-  uri_components(Uri, uri_components(https,'api.github.com',Path,_,_)),
-  http_open(Uri, In, [post(json(_{tag_name: Tag}))]),
-  call_cleanup(
-    copy_stream_data(In, user_output),
-    close(In)
-  ).
+github_create_version(User, Repo, Tag) :-
+  repo_dir(Repo, RepoDir),
+  git([tag,'-a',Tag], [directory(RepoDir)]),
+  git([push,origin,Tag], [directory(RepoDir)]),
+  github_open([repos,User,Repo,releases], [post(json(_{tag_name: Tag}))], 201, In),
+  call_cleanup(copy_stream_data(In, user_output), close(In)).
 
 
 
-%! github_delete_release(+User:atom, +Name:atom, +Tag:atom) is det.
+%! github_delete_version(+User:atom, +Repo:atom, +Version:compound) is det.
 
-github_delete_release(User, Name, Tag) :-
-  atomic_list_concat(['',repos,User,Name,releases,Tag], /, Path),
-  uri_components(Uri, uri_components(https,'api.github.com',Path,_,_)),
-  http_open(Uri, In, [method(delete)]),
-  call_cleanup(
-    copy_stream_data(In, user_output),
-    close(In)
-  ).
+github_delete_version(User, Repo, Version) :-
+  github_version(User, Repo, Version, Id),
+  github_delete_version_id(User, Repo, Id).
+
+github_delete_version_id(User, Repo, Id) :-
+  github_open([repos,User,Repo,releases,Id], [method(delete)], 204, In),
+  call_cleanup(copy_stream_data(In, user_output), close(In)).
 
 
 
@@ -294,43 +296,61 @@ github_info(Dir, User, Repo, Version) :-
 
 
 
-%! github_open(+Segments:list(atom), -In:stream) is det.
+%! github_open(+Segments:list(atom), +Status:between(100,599),
+%!             -In:stream) is det.
+%! github_open(+Segments:list(atom), +Options:list(compound),
+%!             +Status:between(100,599), -In:stream) is det.
 
-github_open(Segments, In) :-
+github_open(Segments, Status, In) :-
+  github_open(Segments, [], Status, In).
+
+
+github_open(Segments, Options1, Status, In) :-
   atomic_list_concat([''|Segments], /, Path),
   uri_components(Uri, uri_components(https,'api.github.com',Path,_,_)),
-  http_open(
-    Uri,
-    In,
-    [request_header('Accept'='application/vnd.github.v3+json')]
-  ).
+  (   setting(user, User),
+      setting(password, Password),
+      ground(User-Password)
+  ->  merge_options([authorization(basic(User,Password))], Options1, Options2)
+  ;   Options2 = Options1
+  ),
+  merge_options(
+    [
+      request_header('Accept'='application/vnd.github.v3+json'),
+      status_code(Status)
+    ],
+    Options2,
+    Options3
+  ),
+  http_open(Uri, In, Options3).
 
 
 
-%! github_release(+User:atom, +Repo:atom, -Tag:atom) is nondet.
+%! github_tag(+User:atom, +Repo:atom, -Tag:atom) is nondet.
 
-github_release(User, Repo, Tag) :-
-  atomic_list_concat(['',repos,User,Repo,releases], /, Path),
-  uri_components(Uri, uri_components(https,'api.github.com',Path,_,_)),
-  htp_open(Uri, In, []),
-  call_cleanup(
-    copy_stream_data(In, user_output),
-    close(In)
-  ).
+github_tag(User, Repo, Tag) :-
+  github_open([repos,User,Repo,tags], 200, In),
+  call_cleanup(json_read_dict(In, Dicts, [value_string_as(atom)]), close(In)),
+  member(Dict, Dicts),
+  Tag = Dict.name.
 
 
 
-%! github_version(+User:atom, +Repo:atom, -Version:compound) is nondet.
+%! github_version(+User:atom, +Repo:atom, ?Version:compound) is nondet.
+%! github_version(+User:atom, +Repo:atom, ?Version:compound,
+%!                -Id:atom) is nondet.
 
 github_version(User, Repo, Version) :-
-  github_open([repos,User,Repo,tags], In),
-  call_cleanup(
-    json_read_dict(In, Tags, [value_string_as(atom)]),
-    close(In)
-  ),
-  member(Tag, Tags),
-  atom_codes(Tag.name, Codes),
-  phrase(version(Version), Codes).
+  github_version(User, Repo, Version, _).
+
+
+github_version(User, Repo, Version, Id) :-
+  github_open([repos,User,Repo,releases], 200, In),
+  call_cleanup(json_read_dict(In, Dicts, [value_string_as(atom)]), close(In)),
+  member(Dict, Dicts),
+  atom_codes(Dict.name, Codes),
+  phrase(version(Version), Codes),
+  Id = Dict.id.
 
 
 
@@ -388,7 +408,7 @@ repo_dir(Repo, RepoDir) :-
       absolute_file_name(
         RepoDir,
         _,
-        [access(read),file_errors(fail),file_type(directory)]
+        [access(read),file_errors(error),file_type(directory)]
       )
   ),
   is_git_directory(RepoDir).
