@@ -30,7 +30,6 @@ A very simple package manager for SWI-Prolog.
 :- use_module(library(lists)).
 :- use_module(library(option)).
 :- use_module(library(ordsets)).
-:- use_module(library(prolog_pack)).
 :- use_module(library(settings)).
 :- use_module(library(uri)).
 
@@ -78,16 +77,11 @@ ppm_install(User, Repo) :-
 ppm_install(User, Repo, Kind) :-
   github_version_latest(User, Repo, Version),
   github_clone_version(User, Repo, Version),
-  prolog_pack_install(Repo),
   repo_deps(Repo, Deps1),
   collect_deps(Deps1, Deps2),
   maplist(ppm_install_dependency, Deps2),
   phrase(version(Version), Codes),
   format("Successfully installed ~a ‘~a’, version ~s\n", [Kind,Repo,Codes]).
-
-prolog_pack_install(Repo) :-
-  repo_is_prolog_pack(Repo),
-  pack_rebuild(Repo).
 
 ppm_install_dependency(Dep) :-
   _{repo: Repo, user: User} :< Dep,
@@ -167,9 +161,7 @@ ppm_publish_version(User, Name, Version) :-
   atom_codes(Tag, Codes),
   git_create_tag(Name, Tag),
   % create the Github release
-  github_create_release(User, Name, Tag),
-  % create the Prolog Pack
-  prolog_pack_publish(User, Name, Tag).
+  github_create_release(User, Name, Tag).
 
 
 
@@ -303,20 +295,6 @@ version(version(Major,Minor,Patch)) -->
   integer(Minor),
   ".",
   integer(Patch).
-
-
-
-
-
-% PACKAGE PLATFORM: Prolog Packs %
-
-%! prolog_pack_publish(+User:atom, +Name:atom, +Tag:atom) is det.
-
-prolog_pack_publish(User, Name, Tag) :-
-  file_name_extension(Tag, zip, Local),
-  atomic_list_concat(['',User,Name,archive,Local], /, Path),
-  uri_components(Uri, uri_components(https,'github.com',Path,_,_)),
-  pack_install(Uri).
 
 
 
@@ -524,7 +502,19 @@ collect_deps([_|T1], T2, L) :-
 
 repo_deps(Repo, Deps) :-
   repo_dir(Repo, Dir),
-  prolog_pack:pack_info_term(Dir, dependencies(Deps)).
+  (   absolute_file_name(
+        ppm,
+        File,
+        [access(read),directory(Dir),extensions([json]),file_errors(fail)]
+      )
+  ->  setup_call_cleanup(
+        open(File, read, In),
+        json_read_dict(In, Dict, [value_string_as(atom)]),
+        close(In)
+      ),
+      get_dict(dependencies, Dict, Deps)
+  ;   Deps = []
+  ).
 
 
 
