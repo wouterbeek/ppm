@@ -35,6 +35,7 @@ A very simple package manager for SWI-Prolog.
 
 :- debug(http(receive_reply)).
 :- debug(http(send_request)).
+:- debug(ppm(git)).
 
 :- setting(password, any, _, "Github password").
 
@@ -75,13 +76,15 @@ ppm_install(User, Repo) :-
   ppm_install(User, Repo, package).
 
 ppm_install(User, Repo, Kind) :-
-  github_version_latest(User, Repo, Version),
+  github_version_latest(User, Repo, Version), !,
   github_clone_version(User, Repo, Version),
   repo_deps(Repo, Deps1),
   collect_deps(Deps1, Deps2),
   maplist(ppm_install_dependency, Deps2),
   phrase(version(Version), Codes),
-  format("Successfully installed ~a ‘~a’, version ~s\n", [Kind,Repo,Codes]).
+  ansi_format([fg(green)], "Successfully installed ~a ‘~a’, version ~s\n", [Kind,Repo,Codes]).
+ppm_install(User, Repo, Kind) :-
+  ansi_format([fg(red)], "Cannot find a version of ~a's ~a ‘~a’.", [User,Kind,Repo]).
 
 ppm_install_dependency(Dep) :-
   _{repo: Repo, user: User} :< Dep,
@@ -224,17 +227,22 @@ ppm_update_dependency(Dep) :-
 % Shows packages, if any, that can be updated using ppm_update/1.
 
 ppm_updates :-
-  forall(
-    ppm_current(User, Repo, CurrentVersion),
+  aggregate_all(
+    set(update(User,Repo,CurrentVersion,Order,LatestVersion)),
     (
+      ppm_current(User, Repo, CurrentVersion),
       github_version_latest(User, Repo, LatestVersion),
       compare_version(Order, CurrentVersion, LatestVersion),
-      ppm_updates_row(User, Repo, Order, CurrentVersion, LatestVersion)
-    )
+      Order \== =
+    ),
+    Updates
+  ),
+  (   Updates == []
+  ->  format("No updates available.\n")
+  ;   maplist(ppm_updates_row, Updates)
   ).
 
-ppm_updates_row(_, _, =, _, _) :- !.
-ppm_updates_row(User, Repo, Order, CurrentVersion, LatestVersion) :-
+ppm_updates_row(update(User,Repo,CurrentVersion,Order,LatestVersion)) :-
   format("~a\t~a\t", [User,Repo]),
   order_colors(Order, Color1, Color2),
   phrase(version(CurrentVersion), CurrentCodes),
@@ -306,7 +314,10 @@ version(version(Major,Minor,Patch)) -->
 
 git_clone_tag(Uri, Tag) :-
   pack_dir(Dir),
-  git([clone,Uri,'--branch',Tag,'--depth',1], [directory(Dir)]).
+  git([clone,Uri,'--branch',Tag,'--depth',1],
+      [directory(Dir),error(Error),output(Output)]),
+  debug(ppm(git), "~s", [Output]),
+  (Error == [] -> true ; print_message(error, "~s", [Error])).
 
 
 
@@ -357,7 +368,7 @@ github_clone_version(User, Repo, Version) :-
   phrase(version(Version), Codes),
   atom_codes(Tag, Codes),
   atomic_list_concat(['',User,Repo], /, Path),
-  uri_components(Uri, uri_components(https,'api.github.com',Path,_,_)),
+  uri_components(Uri, uri_components(https,'github.com',Path,_,_)),
   git_clone_tag(Uri, Tag).
 
 
@@ -457,7 +468,7 @@ github_version(User, Repo, Version, Id) :-
   github_open(User, [repos,User,Repo,releases], 200, In),
   call_cleanup(json_read_dict(In, Dicts, [value_string_as(atom)]), close(In)),
   member(Dict, Dicts),
-  atom_codes(Dict.name, Codes),
+  atom_codes(Dict.tag_name, Codes),
   phrase(version(Version), Codes),
   Id = Dict.id.
 
@@ -529,7 +540,7 @@ repo_dir(Repo, RepoDir) :-
       absolute_file_name(
         RepoDir,
         _,
-        [access(read),file_errors(error),file_type(directory)]
+        [access(read),file_errors(fail),file_type(directory)]
       )
   ),
   is_git_directory(RepoDir).
