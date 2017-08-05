@@ -21,8 +21,10 @@ A very simple package manager for SWI-Prolog.
 :- use_module(library(ansi_term)).
 :- use_module(library(apply)).
 :- use_module(library(dcg/basics)).
+:- use_module(library(debug)).
 :- use_module(library(filesex)).
 :- use_module(library(git)).
+:- use_module(library(http/http_json), []).
 :- use_module(library(http/http_open)).
 :- use_module(library(http/json)).
 :- use_module(library(lists)).
@@ -32,7 +34,9 @@ A very simple package manager for SWI-Prolog.
 :- use_module(library(settings)).
 :- use_module(library(uri)).
 
-:- setting(user, any, _, "Github user name").
+:- debug(http(receive_reply)).
+:- debug(http(send_request)).
+
 :- setting(password, any, _, "Github password").
 
 
@@ -73,7 +77,7 @@ ppm_install(User, Repo) :-
 
 ppm_install(User, Repo, Kind) :-
   github_version_latest(User, Repo, Version),
-  github_clone(User, Repo, Version),
+  github_clone_version(User, Repo, Version),
   prolog_pack_install(Repo),
   repo_deps(Repo, Deps1),
   collect_deps(Deps1, Deps2),
@@ -112,16 +116,60 @@ ppm_list_dep_row(Dep) :-
 
 
 
+%! ppm_publish(+User:atom, +Name:atom) is det.
 %! ppm_publish(+User:atom, +Name:atom, +Version(compound)) is det.
 
-ppm_publish(User, Name, Version) :-
+ppm_publish(User, Name) :-
+  github_authorized(User),
+  ppm_current(User, Repo, CurrentVersion),
+  github_version_latest(User, Repo, LatestVersion),
+  compare_version(Order, CurrentVersion, LatestVersion),
+  (   Order == <
+  ->  phrase(version(CurrentVersion), Codes1),
+      phrase(version(LatestVersion), Codes2),
+      ansi_format(
+        [fg(red)],
+        "Cannot publish package ‘~a’: local version (~s) is behind remote version (~s).\n",
+        [Name,Codes1,Codes2]
+      )
+  ;   (   Order == =
+      ->  increment_version(patch, CurrentVersion, Version),
+          phrase(version(Version), Codes3),
+          format("Publishing package ‘~a’ as patch release ~s.\n", [Name,Codes3])
+      ;   Version = CurrentVersion
+      ),
+      ppm_publish_version(User, Name, Version)
+  ).
+
+
+ppm_publish(User, Name, LocalVersion) :-
+  github_authorized(User),
+  % make sure the new version is newer than the last version.
+  (   github_version_latest(User, Name, RemoteVersion)
+  ->  compare_version(Order, LocalVersion, RemoteVersion),
+      (   memberchk(Order, [<,=])
+      ->  % informational
+          phrase(version(LocalVersion), Codes1),
+          phrase(version(RemoteVersion), Codes2),
+          ansi_format(
+            [fg(red)],
+            "Cannot publish package ‘~a’: local version (~s) must be ahead of remote version (~s).\n",
+            [Name,Codes1,Codes2]
+          )
+      ;   ppm_publish_version(User, Name, LocalVersion)
+      )
+  ;   ppm_publish_version(User, Name, LocalVersion)
+  ).
+
+ppm_publish_version(User, Name, Version) :-
+  % create the Git tag
   phrase(version(Version), Codes),
   atom_codes(Tag, Codes),
-  github_create_version(User, Name, Tag),
-  file_name_extension(Tag, zip, Local),
-  atomic_list_concat(['',User,Name,archive,Local], /, Path),
-  uri_components(Uri, uri_components(https,'api.github.com',Path,_,_)),
-  pack_install(Uri).
+  git_create_tag(Name, Tag),
+  % create the Github release
+  github_create_release(User, Name, Tag),
+  % create the Prolog Pack
+  prolog_pack_publish(User, Name, Tag).
 
 
 
@@ -150,8 +198,10 @@ ppm_update(Repo) :-
 
 ppm_update(Repo, Kind) :-
   ppm_current(User, Repo, CurrentVersion, Deps1),
+  % update existing dependencies
   collect_deps(Deps1, Deps2),
   maplist(ppm_update_dependency, Deps2),
+  % update the package itself
   github_version_latest(User, Repo, LatestVersion),
   (   CurrentVersion == LatestVersion
   ->  (   Kind == package
@@ -228,6 +278,18 @@ compare_version(Order, version(Major1,Minor1,Patch1),
 
 
 
+%! increment_version(+Kind:oneof([major,minor,patch]), +Version1:compound,
+%!                   -Version2:compound) is det.
+
+increment_version(major, version(Ma1,Mi,P), version(Ma2,Mi,P)) :- !,
+  Ma2 is Ma1 + 1.
+increment_version(minor, version(Ma,Mi1,P), version(Ma,Mi2,P)) :- !,
+  Mi2 is Mi1 + 1.
+increment_version(patch, version(Ma,Mi,P1), version(Ma,Mi,P2)) :-
+  P2 is P1 + 1.
+
+
+
 %! version(?Version:compound)// is det.
 %
 % Parses/generates semantic versioning strings.
@@ -246,28 +308,87 @@ version(version(Major,Minor,Patch)) -->
 
 
 
+% PACKAGE PLATFORM: Prolog Packs %
+
+%! prolog_pack_publish(+User:atom, +Name:atom, +Tag:atom) is det.
+
+prolog_pack_publish(User, Name, Tag) :-
+  file_name_extension(Tag, zip, Local),
+  atomic_list_concat(['',User,Name,archive,Local], /, Path),
+  uri_components(Uri, uri_components(https,'github.com',Path,_,_)),
+  pack_install(Uri).
+
+
+
+
+
+% VC: Git %
+
+%! git_clone_tag(+Uri:atom, +Tag:atom) is det.
+
+git_clone_tag(Uri, Tag) :-
+  pack_dir(Dir),
+  git([clone,Uri,'--branch',Tag,'--depth',1], [directory(Dir)]).
+
+
+
+%! git_create_tag(+Repo:atom, +Tag:atom) is det.
+
+git_create_tag(Repo, Tag) :-
+  repo_dir(Repo, RepoDir),
+  git([tag,'-a',Tag,'-m',Tag], [directory(RepoDir)]),
+  git([push,origin,Tag], [directory(RepoDir)]).
+
+
+
+%! git_current_version(+Dir:atom, -Version:compound) is det.
+
+git_current_version(Dir, Version) :-
+  git([describe,'--tags'], [directory(Dir),output(Codes)]),
+  phrase(version(Version), Codes, _Rest).
+
+
+
+%! git_remote_uri(+Dir:atom, -Uri:atom) is det.
+
+git_remote_uri(Dir, Uri) :-
+  git([config,'--get','remote.origin.url'], [directory(Dir),output(Codes)]),
+  atom_codes(Atom, Codes),
+  atom_concat(Uri, '\n', Atom).
+
+
+
+
+
 % SERVICE: GITHUB %
 
-%! github_clone(+User:atom, +Repo:atom, +Version:compound) is det.
+%! github_authorized(+User:atom) is semidet.
 
-github_clone(User, Repo, Version) :-
+github_authorized(User) :-
+  github_open(User, [applications,grants], 200, In),
+  close(In), !.
+github_authorized(User) :-
+  ansi_format([fg(red)], "You are not authorized for modifying Github account ‘~a’.\n", [User]),
+  format("Consider using `set_setting(ppm:password, 'YOUR-PASSWORD')`.\n").
+
+
+
+%! github_clone_version(+User:atom, +Repo:atom, +Version:compound) is det.
+
+github_clone_version(User, Repo, Version) :-
   phrase(version(Version), Codes),
   atom_codes(Tag, Codes),
   atomic_list_concat(['',User,Repo], /, Path),
   uri_components(Uri, uri_components(https,'api.github.com',Path,_,_)),
-  pack_dir(PackDir),
-  git([clone,Uri,'--branch',Tag,'--depth',1], [directory(PackDir)]).
+  git_clone_tag(Uri, Tag).
 
 
 
-%! github_create_version(+User:atom, +Repo:atom, +Tag:atom) is det.
+%! github_create_release(+User:atom, +Repo:atom, +Tag:atom) is det.
 
-github_create_version(User, Repo, Tag) :-
-  repo_dir(Repo, RepoDir),
-  git([tag,'-a',Tag], [directory(RepoDir)]),
-  git([push,origin,Tag], [directory(RepoDir)]),
-  github_open([repos,User,Repo,releases], [post(json(_{tag_name: Tag}))], 201, In),
-  call_cleanup(copy_stream_data(In, user_output), close(In)).
+github_create_release(User, Repo, Tag) :-
+  github_open(User, [repos,User,Repo,releases], [post(json(_{tag_name: Tag}))], 201, In),
+  close(In).
 
 
 
@@ -278,7 +399,7 @@ github_delete_version(User, Repo, Version) :-
   github_delete_version_id(User, Repo, Id).
 
 github_delete_version_id(User, Repo, Id) :-
-  github_open([repos,User,Repo,releases,Id], [method(delete)], 204, In),
+  github_open(User, [repos,User,Repo,releases,Id], [method(delete)], 204, In),
   call_cleanup(copy_stream_data(In, user_output), close(In)).
 
 
@@ -286,50 +407,60 @@ github_delete_version_id(User, Repo, Id) :-
 %! github_info(+Dir:atom, -User:atom, -Repo:atom, -Version:compound) is det.
 
 github_info(Dir, User, Repo, Version) :-
-  git([config,'--get','remote.origin.url'], [directory(Dir),output(Codes1)]),
-  atom_codes(Atom1, Codes1),
-  atom_concat(Uri, '\n', Atom1),
-  uri_components(Uri, uri_components(https,'api.github.com',Path,_,_)),
+  git_remote_uri(Dir, Uri),
+  uri_components(Uri, Comps),
+  uri_data(path, Comps, Path),
   atomic_list_concat(['',User,Repo], /, Path),
-  git([describe,'--tags'], [directory(Dir),output(Codes2)]),
-  phrase(version(Version), Codes2, _Rest).
+  git_current_version(Dir, Version).
 
 
 
-%! github_open(+Segments:list(atom), +Status:between(100,599),
+%! github_open(+User:atom, +Segments:list(atom), +Status:between(100,599),
 %!             -In:stream) is det.
-%! github_open(+Segments:list(atom), +Options:list(compound),
+%! github_open(+User:atom, +Segments:list(atom), +Options:list(compound),
 %!             +Status:between(100,599), -In:stream) is det.
 
-github_open(Segments, Status, In) :-
-  github_open(Segments, [], Status, In).
+github_open(User, Segments, Status, In) :-
+  github_open(User, Segments, [], Status, In).
 
 
-github_open(Segments, Options1, Status, In) :-
+github_open(User, Segments, Options1, Status, In) :-
   atomic_list_concat([''|Segments], /, Path),
   uri_components(Uri, uri_components(https,'api.github.com',Path,_,_)),
-  (   setting(user, User),
-      setting(password, Password),
-      ground(User-Password)
+  (   setting(password, Password),
+      atom(Password)
   ->  merge_options([authorization(basic(User,Password))], Options1, Options2)
   ;   Options2 = Options1
   ),
   merge_options(
     [
+      headers(Headers),
       request_header('Accept'='application/vnd.github.v3+json'),
       status_code(Status)
     ],
     Options2,
     Options3
   ),
-  http_open(Uri, In, Options3).
+  http_open(Uri, In, Options3),
+  (debugging(http(receive_reply)) -> print_http_reply(Status, Headers) ; true).
+
+print_http_reply(Status, Headers) :-
+  debug(http(receive_reply), "~a", [Status]),
+  maplist(print_http_header, Headers),
+  debug(http(receive_reply), "", []).
+
+print_http_header(Header) :-
+  Header =.. [Key1,Value],
+  atomic_list_concat(L, '_', Key1),
+  atomic_list_concat(L, -, Key2),
+  debug(http(receive_reply), "< ~a: ~a", [Key2,Value]).
 
 
 
 %! github_tag(+User:atom, +Repo:atom, -Tag:atom) is nondet.
 
 github_tag(User, Repo, Tag) :-
-  github_open([repos,User,Repo,tags], 200, In),
+  github_open(User, [repos,User,Repo,tags], 200, In),
   call_cleanup(json_read_dict(In, Dicts, [value_string_as(atom)]), close(In)),
   member(Dict, Dicts),
   Tag = Dict.name.
@@ -345,7 +476,7 @@ github_version(User, Repo, Version) :-
 
 
 github_version(User, Repo, Version, Id) :-
-  github_open([repos,User,Repo,releases], 200, In),
+  github_open(User, [repos,User,Repo,releases], 200, In),
   call_cleanup(json_read_dict(In, Dicts, [value_string_as(atom)]), close(In)),
   member(Dict, Dicts),
   atom_codes(Dict.name, Codes),
