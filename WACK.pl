@@ -23,6 +23,7 @@
 :- use_module(library(http/http_open)).
 :- use_module(library(http/json)).
 :- use_module(library(lists)).
+:- use_module(library(ordsets)).
 :- use_module(library(uri)).
 
 
@@ -30,6 +31,8 @@
 
 
 %! wack_current(?User:atom, ?Name:atom, ?Version:compound) is nondet.
+%! wack_current(?User:atom, ?Name:atom, ?Version:compound,
+%!              -Deps:list(dict)) is nondet.
 %
 % Enumerates currently installed WACKs together with their semantic
 % version.
@@ -39,23 +42,25 @@ wack_current(User, Repo, Version) :-
   github_info(RepoDir, User, Repo, Version).
 
 
+wack_current(User, Repo, Version, Deps) :-
+  wack_current(User, Repo, Version),
+  repo_deps(Repo, Deps).
+
+
 
 %! wack_ls is det.
 %
 % Display all currently installed WACKs.
-%
-% TBD Display which packages a package is a dependency for.
 
 wack_ls :-
   forall(
-    wack_current(User, Repo, Version),
-    wack_ls_row(User, Repo, Version)
+    wack_current(User, Repo, Version, Deps),
+    wack_ls_row(User, Repo, Version, Deps)
   ).
 
-wack_ls_row(User, Repo, Version) :-
+wack_ls_row(User, Repo, Version, Deps) :-
   phrase(version(Version), Codes),
   format("~a\t~a\t~s\n", [User,Repo,Codes]),
-  repo_deps(Repo, Deps),
   maplist(wack_ls_dep_row, Deps).
 
 wack_ls_dep_row(Dep) :-
@@ -96,8 +101,6 @@ wack_install_dependency(Dep) :-
 %! wack_remove(+Name:atom) is det.
 %
 % Removes a WACK.
-%
-% TBD: Also remove packages that depend on the removed package.
 
 wack_remove(Repo) :-
   wack_current(_, Repo, Version),
@@ -111,22 +114,37 @@ wack_remove(Repo) :-
 %! wack_update(+Name:atom) is semidet.
 %
 % Updates an exisiting WACK.
-%
-% TBD: Also update packages that are dependencies.
-%
-% TBD: Also install new dependencies.
 
 wack_update(Repo) :-
-  wack_current(User, Repo, CurrentVersion),
+  wack_update(Repo, package).
+
+
+wack_update(Repo, Kind) :-
+  wack_current(User, Repo, CurrentVersion, Deps1),
+  collect_deps(Deps1, Deps2),
+  maplist(wack_update_dependency, Deps2),
   github_version_latest(User, Repo, LatestVersion),
   (   CurrentVersion == LatestVersion
-  ->  format("No need to update.\n")
+  ->  (   Kind == package
+      ->  format("No need to update ~a ‘~a’.\n", [Kind,Repo])
+      ;   true
+      )
   ;   wack_remove(Repo),
-      wack_install(User, Repo),
-      phrase(version(CurrentVersion), Codes1),
-      phrase(version(LatestVersion), Codes2),
-      format("Updated ‘~a’: ~s → ~s\n", [Repo,Codes1,Codes2])
-  ).
+      wack_install(User, Repo)
+  ),
+  % install new dependencies
+  wack_current(User, Repo, LatestVersion, Deps3),
+  collect_deps(Deps3, Deps4),
+  ord_subtract(Deps4, Deps2, Deps5),
+  maplist(wack_install_dependency, Deps5),
+  % informational
+  phrase(version(CurrentVersion), Codes1),
+  phrase(version(LatestVersion), Codes2),
+  format("Updated ‘~a’: ~s → ~s\n", [Repo,Codes1,Codes2]).
+
+wack_update_dependency(Dep) :-
+  get_dict(repo, Dep, Repo),
+  wack_update(Repo, dependency).
 
 
 
@@ -267,13 +285,14 @@ github_version_latest(User, Repo, LatestVersion) :-
 
 % HELPERS %
 
-%! collect_deps(+Deps1:list(dict), -Deps2:list(dict)) is det.
+%! collect_deps(+Deps1:list(dict), -Deps2:ordset(dict)) is det.
 
 collect_deps(L1, L2) :-
   collect_deps(L1, [], L2).
 
 
-collect_deps([], L, L) :- !.
+collect_deps([], L, Set) :- !,
+  list_to_ord_set(L, Set).
 collect_deps([H|T1], T2, L) :-
   get_dict(name, H, Repo),
   repo_dir(Repo, RepoDir),
@@ -315,7 +334,7 @@ directory_path(Dir, Path) :-
 %! get_dict(?Key, +Dict, +Default, -Value) is det.
 
 get_dict(Key, Dict, _, Value) :-
-  get_dict(Key, Dict, Value).
+  get_dict(Key, Dict, Value), !.
 get_dict(_, _, Value, Value).
 
 
