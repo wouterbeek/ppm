@@ -3,6 +3,7 @@
   [
     ppm_install/2, % +User, +Name
     ppm_list/0,
+    ppm_publish/3, % +User, +Name, +Version
     ppm_remove/1,  % +Name
     ppm_update/1,  % +Name
     ppm_updates/0
@@ -103,6 +104,19 @@ prolog_pack_install(Repo) :-
 ppm_install_dependency(Dep) :-
   _{repo: Repo, user: User} :< Dep,
   ppm_install(User, Repo, dependency).
+
+
+
+%! ppm_publish(+User:atom, +Name:atom, +Version(compound)) is det.
+
+ppm_publish(User, Name, Version) :-
+  phrase(version(Version), Codes),
+  atom_codes(Tag, Codes),
+  github_create_release(User, Name, Tag),
+  file_name_extension(Tag, zip, Local),
+  atomic_list_concat(['',User,Name,archive,Local], /, Path),
+  uri_components(Uri, uri_components(https,'api.github.com',Path,_,_)),
+  pack_install(Uri).
 
 
 
@@ -235,9 +249,35 @@ github_clone(User, Repo, Version) :-
   phrase(version(Version), Codes),
   atom_codes(Tag, Codes),
   atomic_list_concat(['',User,Repo], /, Path),
-  uri_components(Uri, uri_components(https,'github.com',Path,_,_)),
+  uri_components(Uri, uri_components(https,'api.github.com',Path,_,_)),
   pack_dir(PackDir),
   git([clone,Uri,'--branch',Tag,'--depth',1], [directory(PackDir)]).
+
+
+
+%! github_create_release(+User:atom, +Name:atom, +Tag:atom) is det.
+
+github_create_release(User, Name, Tag) :-
+  atomic_list_concat(['',repos,User,Name,releases], /, Path),
+  uri_components(Uri, uri_components(https,'api.github.com',Path,_,_)),
+  http_open(Uri, In, [post(json(_{tag_name: Tag}))]),
+  call_cleanup(
+    copy_stream_data(In, user_output),
+    close(In)
+  ).
+
+
+
+%! github_delete_release(+User:atom, +Name:atom, +Tag:atom) is det.
+
+github_delete_release(User, Name, Tag) :-
+  atomic_list_concat(['',repos,User,Name,releases,Tag], /, Path),
+  uri_components(Uri, uri_components(https,'api.github.com',Path,_,_)),
+  http_open(Uri, In, [method(delete)]),
+  call_cleanup(
+    copy_stream_data(In, user_output),
+    close(In)
+  ).
 
 
 
@@ -247,7 +287,7 @@ github_info(Dir, User, Repo, Version) :-
   git([config,'--get','remote.origin.url'], [directory(Dir),output(Codes1)]),
   atom_codes(Atom1, Codes1),
   atom_concat(Uri, '\n', Atom1),
-  uri_components(Uri, uri_components(https,'github.com',Path,_,_)),
+  uri_components(Uri, uri_components(https,'api.github.com',Path,_,_)),
   atomic_list_concat(['',User,Repo], /, Path),
   git([describe,'--tags'], [directory(Dir),output(Codes2)]),
   phrase(version(Version), Codes2, _Rest).
