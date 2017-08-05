@@ -571,7 +571,8 @@ git_tag(Dir, Tag) :-
   git(Dir, [tag], Codes),
   atom_codes(Atom, Codes),
   atomic_list_concat(Tags, '\n', Atom),
-  member(Tag, Tags).
+  member(Tag, Tags),
+  Tag \== ''.
 
 
 
