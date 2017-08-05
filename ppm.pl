@@ -307,6 +307,19 @@ github_open(Segments, In) :-
 
 
 
+%! github_release(+User:atom, +Repo:atom, -Tag:atom) is nondet.
+
+github_release(User, Repo, Tag) :-
+  atomic_list_concat(['',repos,User,Repo,releases], /, Path),
+  uri_components(Uri, uri_components(https,'api.github.com',Path,_,_)),
+  htp_open(Uri, In, []),
+  call_cleanup(
+    copy_stream_data(In, user_output),
+    close(In)
+  ).
+
+
+
 %! github_version(+User:atom, +Repo:atom, -Version:compound) is nondet.
 
 github_version(User, Repo, Version) :-
