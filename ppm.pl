@@ -3,8 +3,8 @@
   [
     ppm_install/2, % +User, +Name
     ppm_list/0,
-    ppm_publish/2, % +User, +Name
-    ppm_publish/3, % +User, +Name, +Version
+    ppm_publish/1, % +Name
+    ppm_publish/2, % +Name, +Version
     ppm_remove/1,  % +Name
     ppm_update/1,  % +Name
     ppm_updates/0
@@ -33,15 +33,12 @@ A very simple package manager for SWI-Prolog.
 :- use_module(library(option)).
 :- use_module(library(ordsets)).
 :- use_module(library(readutil)).
-:- use_module(library(settings)).
 :- use_module(library(uri)).
 
 :- debug(http(receive_reply)).
 :- debug(http(send_request)).
 :- debug(ppm(git)).
 :- debug(ppm(github)).
-
-:- setting(password, any, _, "Github password").
 
 
 
@@ -85,9 +82,17 @@ ppm_install(User, Repo, Kind) :-
   collect_deps(Deps1, Deps2),
   maplist(ppm_install_dependency, Deps2),
   phrase(version(Version), Codes),
-  ansi_format([fg(green)], "Successfully installed ~a ‘~a’, version ~s\n", [Kind,Repo,Codes]).
+  ansi_format(
+    [fg(green)],
+    "Successfully installed ~a ‘~a’, version ~s\n",
+    [Kind,Repo,Codes]
+  ).
 ppm_install(User, Repo, Kind) :-
-  ansi_format([fg(red)], "Cannot find a version of ~a's ~a ‘~a’.", [User,Kind,Repo]).
+  ansi_format(
+    [fg(red)],
+    "Cannot find a version of ~a's ~a ‘~a’.",
+    [User,Kind,Repo]
+  ).
 
 ppm_install_dependency(Dep) :-
   _{repo: Repo, user: User} :< Dep,
@@ -100,12 +105,17 @@ ppm_install_dependency(Dep) :-
 % Display all currently installed PPMs.
 
 ppm_list :-
-  forall(
+  aggregate_all(
+    set(package(User,Repo,Version,Deps)),
     ppm_current(User, Repo, Version, Deps),
-    ppm_list_row(User, Repo, Version, Deps)
+    Packages
+  ),
+  (   Packages == []
+  ->  format("No packages are currently installed.\n")
+  ;   maplist(ppm_list_row, Packages)
   ).
 
-ppm_list_row(User, Repo, Version, Deps) :-
+ppm_list_row(package(User,Repo,Version,Deps)) :-
   phrase(version(Version), Codes),
   format("~a\t~a\t~s\n", [User,Repo,Codes]),
   maplist(ppm_list_dep_row, Deps).
@@ -116,16 +126,17 @@ ppm_list_dep_row(Dep) :-
 
 
 
-%! ppm_publish(+User:atom, +Name:atom) is det.
-%! ppm_publish(+User:atom, +Name:atom, +Version(compound)) is det.
+%! ppm_publish(+Name:atom) is det.
+%! ppm_publish(+Name:atom, +Version(compound)) is det.
 
-ppm_publish(User, Repo) :-
-  github_authorized(User),
+ppm_publish(Repo) :-
+  github_authorized(User, Password),
   ppm_current(User, Repo, CurrentVersion),
   github_version_latest(User, Repo, LatestVersion),
   compare_version(Order, CurrentVersion, LatestVersion),
   (   Order == <
-  ->  phrase(version(CurrentVersion), Codes1),
+  ->  % informational
+      phrase(version(CurrentVersion), Codes1),
       phrase(version(LatestVersion), Codes2),
       ansi_format(
         [fg(red)],
@@ -134,16 +145,17 @@ ppm_publish(User, Repo) :-
       )
   ;   (   Order == =
       ->  increment_version(patch, CurrentVersion, Version),
+          % informational
           phrase(version(Version), Codes3),
           format("Publishing package ‘~a’ as patch release ~s.\n", [Repo,Codes3])
       ;   Version = CurrentVersion
       ),
-      ppm_publish_version(User, Repo, Version)
+      ppm_publish(User, Password, Repo, Version)
   ).
 
 
-ppm_publish(User, Repo, LocalVersion) :-
-  github_authorized(User),
+ppm_publish(Repo, LocalVersion) :-
+  github_authorized(User, Password),
   % make sure the new version is newer than the last version.
   (   github_version_latest(User, Repo, RemoteVersion)
   ->  compare_version(Order, LocalVersion, RemoteVersion),
@@ -156,19 +168,19 @@ ppm_publish(User, Repo, LocalVersion) :-
             "Cannot publish package ‘~a’: local version (~s) must be ahead of remote version (~s).\n",
             [Repo,Codes1,Codes2]
           )
-      ;   ppm_publish_version(User, Repo, LocalVersion)
+      ;   ppm_publish(User, Password, Repo, LocalVersion)
       )
-  ;   ppm_publish_version(User, Repo, LocalVersion)
+  ;   ppm_publish(User, Password, Repo, LocalVersion)
   ).
 
-ppm_publish_version(User, Repo, Version) :-
+ppm_publish(User, Password, Repo, Version) :-
   % create the Git tag
   repo_dir(Repo, RepoDir),
   phrase(version(Version), Codes),
   atom_codes(Tag, Codes),
   git_create_tag(RepoDir, Tag),
   % create the Github release
-  github_create_release(User, Repo, Tag).
+  github_create_release(User, Password, Repo, Tag).
 
 
 
@@ -333,8 +345,14 @@ git_create_tag(Dir, Tag) :-
 %! git_current_version(+Dir:atom, -Version:compound) is det.
 
 git_current_version(Dir, Version) :-
-  git(Dir, [describe,'--tags'], Codes),
+  % Git returns error code 128 when there are no tags
+  catch(git(Dir, [describe,'--tags'], Codes), E, fail_on(128, E)),
   phrase(version(Version), Codes, _Rest).
+
+fail_on(Status, error(process_error(git(_),exit(Status)),_)) :- !,
+  fail.
+fail_on(_, E) :-
+  throw(E).
 
 
 
@@ -351,12 +369,21 @@ git_remote_uri(Dir, Uri) :-
 
 % SERVICE: GITHUB %
 
-%! github_authorized(+User:atom) is semidet.
+%! github_authorized(-User:atom, -Password:atom) is semidet.
 
+github_authorized(User, Password) :-
+  ansi_format([fg(yellow)], "Github user name: ", []),
+  read_line_to_codes(user_input, Codes1),
+  ansi_format([fg(yellow)], "Github password: ", []),
+  read_line_to_codes(user_input, Codes2),
+  maplist(atom_codes, [User,Password], [Codes1,Codes2]),
+  github_open_authorized(User, Password, [applications,grants], [], 200), !.
 github_authorized(User) :-
-  github_open(User, [applications,grants], [], 200), !.
-github_authorized(User) :-
-  ansi_format([fg(red)], "You are not authorized for modifying Github account ‘~a’.\n", [User]),
+  ansi_format(
+    [fg(red)],
+    "You are not authorized for modifying Github account ‘~a’.\n",
+    [User]
+  ),
   format("Consider using `set_setting(ppm:password, 'YOUR-PASSWORD')`.\n").
 
 
@@ -372,10 +399,17 @@ github_clone_version(User, Repo, Version) :-
 
 
 
-%! github_create_release(+User:atom, +Repo:atom, +Tag:atom) is det.
+%! github_create_release(+User:atom, +Password:atom, +Repo:atom,
+%!                       +Tag:atom) is det.
 
-github_create_release(User, Repo, Tag) :-
-  github_open(User, [repos,User,Repo,releases], [post(json(_{tag_name: Tag}))], 201).
+github_create_release(User, Password, Repo, Tag) :-
+  github_open_authorized(
+    User,
+    Password,
+    [repos,User,Repo,releases],
+    [post(json(_{tag_name: Tag}))],
+    201
+  ).
 
 
 
@@ -391,35 +425,30 @@ github_info(Repo, User, Repo, Version) :-
 
 
 
-%! github_open(+User:atom, +Segments:list(atom), +Options:list(compound),
+%! github_open(+Segments:list(atom), +Options:list(compound),
 %!             +Status:between(100,599)) is det.
-%! github_open(+User:atom, +Segments:list(atom), +Options:list(compound),
+%! github_open(+Segments:list(atom), +Options:list(compound),
 %!             +Status:between(100,599), -In:stream) is det.
 
-github_open(User, Segments, Options1, Status) :-
-  github_open(User, Segments, Options1, Status, In),
+github_open(Segments, Options, Status) :-
+  github_open(Segments, Options, Status, In),
   read_stream_to_codes(In, Codes),
   debug(ppm(github), "~s", [Codes]).
 
 
-github_open(User, Segments, Options1, Status, In) :-
+github_open(Segments, Options1, Status, In) :-
   atomic_list_concat([''|Segments], /, Path),
   uri_components(Uri, uri_components(https,'api.github.com',Path,_,_)),
-  (   setting(password, Password),
-      atom(Password)
-  ->  merge_options([authorization(basic(User,Password))], Options1, Options2)
-  ;   Options2 = Options1
-  ),
   merge_options(
     [
       headers(Headers),
       request_header('Accept'='application/vnd.github.v3+json'),
       status_code(Status)
     ],
-    Options2,
-    Options3
+    Options1,
+    Options2
   ),
-  http_open(Uri, In, Options3),
+  http_open(Uri, In, Options2),
   (debugging(http(receive_reply)) -> print_http_reply(Status, Headers) ; true).
 
 print_http_reply(Status, Headers) :-
@@ -435,6 +464,16 @@ print_http_header(Header) :-
 
 
 
+%! github_open_authorized(+User:atom, +Password:atom, +Segments:list(atom),
+%!                        +Options:list(compound),
+%!                        +Status:between(100,599)) is det.
+
+github_open_authorized(User, Password, Segments, Options1, Status) :-
+  merge_options([authorization(basic(User,Password))], Options1, Options2),
+  github_open(Segments, Options2, Status).
+
+
+
 %! github_version(+User:atom, +Repo:atom, ?Version:compound) is nondet.
 %! github_version(+User:atom, +Repo:atom, ?Version:compound,
 %!                -Id:atom) is nondet.
@@ -444,7 +483,7 @@ github_version(User, Repo, Version) :-
 
 
 github_version(User, Repo, Version, Id) :-
-  github_open(User, [repos,User,Repo,releases], [], 200, In),
+  github_open([repos,User,Repo,releases], [], 200, In),
   call_cleanup(json_read_dict(In, Dicts, [value_string_as(atom)]), close(In)),
   member(Dict, Dicts),
   atom_codes(Dict.tag_name, Codes),
@@ -502,23 +541,21 @@ git(Dir, Args, Output) :-
 
 
 
-%! repo_deps(+Repo:atom, -Deps:list(dict)) is det.
+%! repo_deps(+Repo:atom, -Deps:list(dict)) is semidet.
 
 repo_deps(Repo, Deps) :-
   repo_dir(Repo, Dir),
-  (   absolute_file_name(
-        ppm,
-        File,
-        [access(read),directory(Dir),extensions([json]),file_errors(fail)]
-      )
-  ->  setup_call_cleanup(
-        open(File, read, In),
-        json_read_dict(In, Dict, [value_string_as(atom)]),
-        close(In)
-      ),
-      get_dict(dependencies, Dict, Deps)
-  ;   Deps = []
-  ).
+  absolute_file_name(
+    ppm,
+    File,
+    [access(read),directory(Dir),extensions([json]),file_errors(fail)]
+  ),
+  setup_call_cleanup(
+    open(File, read, In),
+    json_read_dict(In, Dict, [value_string_as(atom)]),
+    close(In)
+  ),
+  get_dict(dependencies, Dict, [], Deps).
 
 
 
@@ -580,14 +617,14 @@ git_tag(Dir, Tag) :-
 
 github_delete_version(User, Repo, Version) :-
   github_version(User, Repo, Version, Id),
-  github_open(User, [repos,User,Repo,releases,Id], [method(delete)], 204).
+  github_open([repos,User,Repo,releases,Id], [method(delete)], 204).
 
 
 
 %! github_tag(+User:atom, +Repo:atom, -Tag:atom) is nondet.
 
 github_tag(User, Repo, Tag) :-
-  github_open(User, [repos,User,Repo,tags], [], 200, In),
+  github_open([repos,User,Repo,tags], [], 200, In),
   call_cleanup(json_read_dict(In, Dicts, [value_string_as(atom)]), close(In)),
   member(Dict, Dicts),
   Tag = Dict.name.
