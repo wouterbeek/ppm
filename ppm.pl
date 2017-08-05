@@ -3,7 +3,6 @@
   [
     ppm_install/2, % +User, +Name
     ppm_list/0,
-    ppm_publish/1, % +Name
     ppm_publish/2, % +Name, +Version
     ppm_remove/1,  % +Name
     ppm_update/1,  % +Name
@@ -95,10 +94,11 @@ ppm_install(User, Repo, Kind) :-
     [fg(red)],
     "Cannot find a version of ~a's ~a ‘~a’.",
     [User,Kind,Repo]
-  ).
+  ),
+  fail.
 
 ppm_install_dependency(Dep) :-
-  _{repo: Repo, user: User} :< Dep,
+  _{name: Repo, user: User} :< Dep,
   ppm_install(User, Repo, dependency).
 
 
@@ -120,51 +120,27 @@ ppm_list :-
 
 ppm_list_row(package(User,Repo,Version,Deps)) :-
   phrase(version(Version), Codes),
-  format("~a\t~a\t~s\n", [User,Repo,Codes]),
+  format("~a/~a (~s)\n", [User,Repo,Codes]),
   maplist(ppm_list_dep_row, Deps).
 
 ppm_list_dep_row(Dep) :-
-  get_dict(repo, Dep, Repo),
-  format("\t→ ~a\n", [Repo]).
+  _{name: Repo, user: User} :< Dep,
+  format("  ⤷ ~a/~a\n", [User,Repo]).
 
 
 
-%! ppm_publish(+Name:atom) is det.
 %! ppm_publish(+Name:atom, +Version(compound)) is det.
 
-ppm_publish(Repo) :-
-  github_authorized(User, Password),
-  % use `v0.0.1' if no version is currently set
-  (   ppm_current(User, Repo, CurrentVersion)
-  ->  github_version_latest(User, Repo, LatestVersion),
-      compare_version(Order, CurrentVersion, LatestVersion)
-  ;   CurrentVersion = version(0,0,1),
-      Order = >
-  ),
-  (   Order == <
-  ->  % informational
-      phrase(version(CurrentVersion), Codes1),
-      phrase(version(LatestVersion), Codes2),
-      ansi_format(
-        [fg(red)],
-        "Cannot publish package ‘~a’: local version (~s) is behind remote version (~s).\n",
-        [Repo,Codes1,Codes2]
-      )
-  ;   (   Order == =
-      ->  increment_version(patch, CurrentVersion, Version),
-          % informational
-          phrase(version(Version), Codes3),
-          format("Publishing package ‘~a’ as patch release ~s.\n", [Repo,Codes3])
-      ;   Version = CurrentVersion
-      ),
-      ppm_publish(User, Password, Repo, Version)
-  ).
-
-
 ppm_publish(Repo, LocalVersion) :-
-  github_authorized(User, Password),
-  % make sure the new version is newer than the last version.
-  (   github_version_latest(User, Repo, RemoteVersion)
+  % make sure the local version is set as a Git tag
+  phrase(version(LocalVersion), Codes),
+  atom_codes(Tag, Codes),
+  repo_dir(Repo, RepoDir),
+  git_create_tag(RepoDir, Tag),
+  % make sure the local version is ahead of the remote version
+  (   git_remote_uri(RepoDir, Uri),
+      github_uri(Uri, User, Repo),
+      github_version_latest(User, Repo, RemoteVersion)
   ->  compare_version(Order, LocalVersion, RemoteVersion),
       (   memberchk(Order, [<,=])
       ->  % informational
@@ -174,18 +150,14 @@ ppm_publish(Repo, LocalVersion) :-
             [fg(red)],
             "Cannot publish package ‘~a’: local version (~s) must be ahead of remote version (~s).\n",
             [Repo,Codes1,Codes2]
-          )
-      ;   ppm_publish(User, Password, Repo, LocalVersion)
+          ),
+          fail
+      ;   true
       )
-  ;   ppm_publish(User, Password, Repo, LocalVersion)
-  ).
-
-ppm_publish(User, Password, Repo, Version) :-
-  % create the Git tag
-  repo_dir(Repo, RepoDir),
-  phrase(version(Version), Codes),
-  atom_codes(Tag, Codes),
-  git_create_tag(RepoDir, Tag),
+  ;   true
+  ),
+  % Github authorization
+  github_authorized(User, Password),
   % create the Github release
   github_create_release(User, Password, Repo, Tag).
 
@@ -344,6 +316,8 @@ git_clone_tag(Uri, Tag) :-
 %! git_create_tag(+Dir:atom, +Tag:atom) is det.
 
 git_create_tag(Dir, Tag) :-
+  git_tag(Dir, Tag), !.
+git_create_tag(Dir, Tag) :-
   git(Dir, [tag,'-a',Tag,'-m',Tag]),
   git(Dir, [push,origin,Tag]).
 
@@ -385,13 +359,6 @@ github_authorized(User, Password) :-
   read_line_to_codes(user_input, Codes2),
   maplist(atom_codes, [User,Password], [Codes1,Codes2]),
   github_open_authorized(User, Password, [applications,grants], [], 200), !.
-github_authorized(User) :-
-  ansi_format(
-    [fg(red)],
-    "You are not authorized for modifying Github account ‘~a’.\n",
-    [User]
-  ),
-  format("Consider using `set_setting(ppm:password, 'YOUR-PASSWORD')`.\n").
 
 
 
@@ -606,14 +573,18 @@ git_delete_tag(Dir, Tag) :-
 
 
 
+%! git_tag(+Dir:atom, +Tag:atom) is semidet.
 %! git_tag(+Dir:atom, -Tag:atom) is nondet.
 
 git_tag(Dir, Tag) :-
   git(Dir, [tag], Codes),
   atom_codes(Atom, Codes),
   atomic_list_concat(Tags, '\n', Atom),
-  member(Tag, Tags),
-  Tag \== ''.
+  (   var(Tag)
+  ->  member(Tag, Tags),
+      Tag \== ''
+  ;   memberchk(Tag, Tags)
+  ).
 
 
 
