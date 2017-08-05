@@ -3,6 +3,7 @@
   [
     ppm_install/2, % +User, +Name
     ppm_list/0,
+    ppm_publish/2, % +User, +Name
     ppm_publish/3, % +User, +Name, +Version
     ppm_remove/1,  % +Name
     ppm_update/1,  % +Name
@@ -18,6 +19,7 @@ A very simple package manager for SWI-Prolog.
 @version 2017/06, 2017/08
 */
 
+:- use_module(library(aggregate)).
 :- use_module(library(ansi_term)).
 :- use_module(library(apply)).
 :- use_module(library(dcg/basics)).
@@ -381,18 +383,6 @@ github_create_release(User, Repo, Tag) :-
 
 
 
-%! github_delete_version(+User:atom, +Repo:atom, +Version:compound) is det.
-
-github_delete_version(User, Repo, Version) :-
-  github_version(User, Repo, Version, Id),
-  github_delete_version_id(User, Repo, Id).
-
-github_delete_version_id(User, Repo, Id) :-
-  github_open(User, [repos,User,Repo,releases,Id], [method(delete)], 204, In),
-  call_cleanup(copy_stream_data(In, user_output), close(In)).
-
-
-
 %! github_info(+Dir:atom, -User:atom, -Repo:atom, -Version:compound) is det.
 
 github_info(Dir, User, Repo, Version) :-
@@ -443,16 +433,6 @@ print_http_header(Header) :-
   atomic_list_concat(L, '_', Key1),
   atomic_list_concat(L, -, Key2),
   debug(http(receive_reply), "< ~a: ~a", [Key2,Value]).
-
-
-
-%! github_tag(+User:atom, +Repo:atom, -Tag:atom) is nondet.
-
-github_tag(User, Repo, Tag) :-
-  github_open(User, [repos,User,Repo,tags], 200, In),
-  call_cleanup(json_read_dict(In, Dicts, [value_string_as(atom)]), close(In)),
-  member(Dict, Dicts),
-  Tag = Dict.name.
 
 
 
@@ -556,6 +536,32 @@ repo_is_prolog_pack(Repo) :-
     _,
     [access(read),file_type(prolog),file_errors(fail),relative_to(RepoDir)]
   ).
+
+
+
+
+
+% MAINTENANCE %
+
+%! github_delete_version(+User:atom, +Repo:atom, +Version:compound) is det.
+
+github_delete_version(User, Repo, Version) :-
+  github_version(User, Repo, Version, Id),
+  github_delete_version_id(User, Repo, Id).
+
+github_delete_version_id(User, Repo, Id) :-
+  github_open(User, [repos,User,Repo,releases,Id], [method(delete)], 204, In),
+  call_cleanup(copy_stream_data(In, user_output), close(In)).
+
+
+
+%! github_tag(+User:atom, +Repo:atom, -Tag:atom) is nondet.
+
+github_tag(User, Repo, Tag) :-
+  github_open(User, [repos,User,Repo,tags], 200, In),
+  call_cleanup(json_read_dict(In, Dicts, [value_string_as(atom)]), close(In)),
+  member(Dict, Dicts),
+  Tag = Dict.name.
 
 
 
