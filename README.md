@@ -1,16 +1,14 @@
-# WACK
+# Prolog-Package-Manager (PPM)
 
-A super-simple package manager for SWI-Prolog.
+A very simple package manager for SWI-Prolog.
 
-To keep things super-simple, WACK makes the following assumptions:
+PPMs are Prolog Packs for which the following assumptions hold:
 
-  1. Your package is hosted in a public Github repository.
+  1. It is hosted as a public Github repository.
 
-  2. Your package has a JSON file `WACK.json' in its root that
-     documents the dependencies of your package.  See
-     https:://github.com/wouterbeek/plRdf/blob/master/WACK.json for an
-     example.
+  2. It uses Git annotated tags (created with `git tag -a vX.Y.Z -m
+     '…'`) that denote the package version with a semantic version
+     string (`vX.Y.Z`).
 
-  3. Your package uses Git annotated tags (created with `git tag -a
-     vX.Y.Z -m '…'`) that denote the package version with semantic
-     versioning (`vX.Y.Z`).
+Prolog Packs that do not follow these assumptions are not PPMs.  They
+should be handled with the more versatile `library(prolog_pack)`.
