@@ -52,27 +52,6 @@ ppm_current(User, Repo, Version, Deps) :-
 
 
 
-%! ppm_list is det.
-%
-% Display all currently installed PPMs.
-
-ppm_list :-
-  forall(
-    ppm_current(User, Repo, Version, Deps),
-    ppm_list_row(User, Repo, Version, Deps)
-  ).
-
-ppm_list_row(User, Repo, Version, Deps) :-
-  phrase(version(Version), Codes),
-  format("~a\t~a\t~s\n", [User,Repo,Codes]),
-  maplist(ppm_list_dep_row, Deps).
-
-ppm_list_dep_row(Dep) :-
-  get_dict(repo, Dep, Repo),
-  format("\t→ ~a\n", [Repo]).
-
-
-
 %! ppm_install(+User:atom, +Repo:atom) is semidet.
 %
 % Installs a package.  The latests version is chosen in case none is
@@ -104,6 +83,27 @@ prolog_pack_install(Repo) :-
 ppm_install_dependency(Dep) :-
   _{repo: Repo, user: User} :< Dep,
   ppm_install(User, Repo, dependency).
+
+
+
+%! ppm_list is det.
+%
+% Display all currently installed PPMs.
+
+ppm_list :-
+  forall(
+    ppm_current(User, Repo, Version, Deps),
+    ppm_list_row(User, Repo, Version, Deps)
+  ).
+
+ppm_list_row(User, Repo, Version, Deps) :-
+  phrase(version(Version), Codes),
+  format("~a\t~a\t~s\n", [User,Repo,Codes]),
+  maplist(ppm_list_dep_row, Deps).
+
+ppm_list_dep_row(Dep) :-
+  get_dict(repo, Dep, Repo),
+  format("\t→ ~a\n", [Repo]).
 
 
 
