@@ -52,7 +52,10 @@ A very simple package manager for SWI-Prolog.
 % version number.
 
 ppm_current(User, Repo, Version) :-
-  github_info(Repo, User, Repo, Version).
+  repo_dir(Repo, RepoDir),
+  git_remote_uri(RepoDir, Uri),
+  github_uri(Uri, User, Repo),
+  git_current_version(RepoDir, Version).
 
 
 ppm_current(User, Repo, Version, Deps) :-
@@ -131,9 +134,13 @@ ppm_list_dep_row(Dep) :-
 
 ppm_publish(Repo) :-
   github_authorized(User, Password),
-  ppm_current(User, Repo, CurrentVersion),
-  github_version_latest(User, Repo, LatestVersion),
-  compare_version(Order, CurrentVersion, LatestVersion),
+  % use `v0.0.1' if no version is currently set
+  (   ppm_current(User, Repo, CurrentVersion)
+  ->  github_version_latest(User, Repo, LatestVersion),
+      compare_version(Order, CurrentVersion, LatestVersion)
+  ;   CurrentVersion = version(0,0,1),
+      Order = >
+  ),
   (   Order == <
   ->  % informational
       phrase(version(CurrentVersion), Codes1),
@@ -413,15 +420,12 @@ github_create_release(User, Password, Repo, Tag) :-
 
 
 
-%! github_info(+Repo:atom, -User:atom, -Repo:atom, -Version:compound) is det.
+%! github_info(+Uri:atom, -User:atom, -Repo:atom) is det.
 
-github_info(Repo, User, Repo, Version) :-
-  repo_dir(Repo, RepoDir),
-  git_remote_uri(RepoDir, Uri),
+github_uri(Uri, User, Repo, RepoDir) :-
   uri_components(Uri, Comps),
   uri_data(path, Comps, Path),
-  atomic_list_concat(['',User,Repo], /, Path),
-  git_current_version(RepoDir, Version).
+  atomic_list_concat(['',User,Repo], /, Path).
 
 
 
