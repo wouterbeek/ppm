@@ -1,61 +1,67 @@
 #!/bin/bash
-sudo dnf install \
-  autoconf \
-  chrpath \
-  curl \
-  libunwind \
-  freetype-devel \
-  gmp-devel \
-  java-1.8.0-openjdk-devel \
-  jpackage-utils \
-  libarchive-devel \
-  libICE-devel \
-  libjpeg-turbo-devel \
-  libSM-devel \
-  libX11-devel \
-  libXaw-devel \
-  libXext-devel \
-  libXft-devel \
-  libXinerama-devel \
-  libXmu-devel \
-  libXpm-devel \
-  libXrender-devel \
-  libXt-devel \
-  ncurses-devel \
-  openssl-devel \
-  pkgconfig \
-  readline-devel \
-  libedit-devel \
-  unixODBC-devel \
-  zlib-devel \
-  uuid-devel ;
-git clone https://github.com/SWI-Prolog/swipl-devel && \
-  cd swipl-devel && \
-  ./prepare --yes && \
-  cp build.templ build && \
-  ./build;
+
+function dnf_installed {
+  if dnf list installed "$@" >/dev/null 2>&1; then
+    true
+  else
+    false
+  fi
+}
 
 findexe()
-{ oldifs="$IFS"
+{
+  oldifs="$IFS"
   IFS=:
   for d in $PATH; do
     if [ -x $d/$1 ]; then
-       IFS="$oldifs"
-       return 0
+      IFS="$oldifs"
+      return 0
     fi
   done
   IFS="$oldifs"
   return 1
 }
 
-if [ -z "$SWIPL" ]; then
-  findexe swipl;
-  SWIPL=swipl
-fi
-if [ -z "$SWIPL" ]; then
-  echo "ERROR: Cannot find SWI-Prolog."
-  exit 1
+#if ! findexe swipl; then
+  sudo dnf -q -y install \
+     autoconf \
+     chrpath \
+     curl \
+     freetype-devel \
+     git \
+     gmp-devel \
+     java-1.8.0-openjdk-devel \
+     jpackage-utils \
+     libarchive-devel \
+     libedit-devel \
+     libICE-devel \
+     libjpeg-turbo-devel \
+     libSM-devel \
+     libunwind \
+     libX11-devel \
+     libXaw-devel \
+     libXext-devel \
+     libXft-devel \
+     libXinerama-devel \
+     libXmu-devel \
+     libXpm-devel \
+     libXrender-devel \
+     libXt-devel \
+     ncurses-devel \
+     openssl-devel \
+     pkgconfig \
+     readline-devel \
+     serd-devel \
+     unixODBC-devel \
+     uuid-devel \
+     zlib-devel
+  #export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/lib/jvm/java-1.8.0-openjdk-1.8.0.131-1.b12.fc25.x86_64/jre/lib/amd64/:/usr/lib/jvm/java-1.8.0-openjdk-1.8.0.131-1.b12.fc25.x86_64/jre/lib/amd64/server/
+  git clone https://github.com/SWI-Prolog/swipl-devel && \
+    cd swipl-devel && \
+    ./prepare --yes && \
+    cp build.templ build && \
+    ./build;
 fi
 
-install="$(dirname $0)/install.pl"
-$SWIPL -q -f "$install" -- $*
+setup="$(dirname $0)/setup.pl"
+swipl -q -f "$setup" -- $*
