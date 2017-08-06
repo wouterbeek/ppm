@@ -53,7 +53,7 @@ A very simple package manager for SWI-Prolog.
 ppm_current(User, Repo, Version) :-
   repo_dir(Repo, RepoDir),
   git_remote_uri(RepoDir, Uri),
-  github_uri(Uri, User, Repo),
+  github_remote_uri(Uri, User, Repo),
   git_current_version(RepoDir, Version).
 
 
@@ -133,8 +133,8 @@ ppm_list_dep_row(Dep) :-
 
 ppm_publish(Repo, LocalVersion) :-
   repo_dir(Repo, RepoDir),
-  git_remote_uri(RepoDir, Uri),
-  github_uri(Uri, User, Repo),
+  git_remote_uri(RepoDir, Uri), !,
+  github_remote_uri(Uri, User, Repo),
   % make sure the local version is set as a Git tag
   phrase(version(LocalVersion), Codes),
   atom_codes(Tag, Codes),
@@ -158,6 +158,12 @@ ppm_publish(Repo, LocalVersion) :-
   ),
   % create the Github release
   github_create_release(User, Repo, Tag).
+ppm_publish(Repo, LocalVersion) :-
+  github_create_repository(Repo, Uri),
+  repo_dir(Repo, RepoDir),
+  git_add_remote_uri(RepoDir, Uri),
+  git_initial_push(RepoDir),
+  ppm_publish(Repo, LocalVersion).
 
 
 
@@ -303,11 +309,25 @@ version(version(Major,Minor,Patch)) -->
 
 % VC: Git %
 
+%! git_add_remote_uri(+Dir:atom, +Uri:atom) is det.
+
+git_add_remote_uri(Dir, Uri) :-
+  git(Dir, [remote,add,origin,Uri]).
+
+
+
 %! git_clone_tag(+Uri:atom, +Tag:atom) is det.
 
 git_clone_tag(Uri, Tag) :-
   pack_dir(PackDir),
   git(PackDir, [clone,Uri,'--branch',Tag,'--depth',1]).
+
+
+
+%! git_initial_push(+Dir:atom) is det.
+
+git_initial_push(Dir) :-
+  git(Dir, [push,'-u',origin,master]).
 
 
 
@@ -370,6 +390,15 @@ github_create_release(User, Repo, Tag) :-
 
 
 
+%! github_create_repository(+Repo:atom, -Uri:atom) is det.
+
+github_create_repository(Repo, Uri) :-
+  github_open_authorized([user,repos], [post(json(_{name: Repo}))], 201, In),
+  call_cleanup(json_read_dict(In, Dict, [value_string_as(atom)]), close(In)),
+  Uri = Dict.html_url.
+
+
+
 %! github_open(+Segments:list(atom), +Options:list(compound),
 %!             +Status:between(100,599)) is det.
 %! github_open(+Segments:list(atom), +Options:list(compound),
@@ -411,24 +440,41 @@ print_http_header(Header) :-
 
 %! github_open_authorized(+Segments:list(atom), +Options:list(compound),
 %!                        +Status:between(100,599)) is det.
+%! github_open_authorized(+Segments:list(atom), +Options:list(compound),
+%!                        +Status:between(100,599), -In:stream) is det.
 
 github_open_authorized(Segments, Options1, Status) :-
+  github_open_authorized_options(Options1, Options2),
+  github_open(Segments, Options2, Status).
+
+
+github_open_authorized(Segments, Options1, Status, In) :-
+  github_open_authorized_options(Options1, Options2),
+  github_open(Segments, Options2, Status, In).
+
+github_open_authorized_options(Options1, Options2) :-
   ansi_format([fg(yellow)], "Github user name: ", []),
   read_line_to_codes(user_input, Codes1),
   ansi_format([fg(yellow)], "Github password: ", []),
   read_line_to_codes(user_input, Codes2),
   maplist(atom_codes, [User,Password], [Codes1,Codes2]),
-  merge_options([authorization(basic(User,Password))], Options1, Options2),
-  github_open(Segments, Options2, Status).
+  merge_options([authorization(basic(User,Password))], Options1, Options2).
 
 
 
-%! github_info(+Uri:atom, -User:atom, -Repo:atom) is det.
+%! github_remote_uri(+Uri:atom, -User:atom, -Repo:atom) is det.
 
-github_uri(Uri, User, Repo) :-
+github_remote_uri(Uri, User, Repo) :-
   uri_components(Uri, Comps),
   uri_data(path, Comps, Path),
   atomic_list_concat(['',User,Repo], /, Path).
+
+
+
+%! github_repository(+User:atom, +Repo:atom) is det.
+
+github_repository(User, Repo) :-
+  github_open([repos,User,Repo], [], 200).
 
 
 
@@ -485,17 +531,18 @@ collect_deps([_|T1], T2, L) :-
 
 
 
-%! git(+Dir:atom, +Arguments:list(atom)) is det.
-%! git(+Dir:atom, +Arguments:list(atom), -Output:list(code)) is det.
+%! git(+Dir:atom, +Arguments:list(atom)) is semidet.
+%! git(+Dir:atom, +Arguments:list(atom), -Output:list(code)) is semidet.
 
 git(Dir, Args) :-
   git(Dir, Args, _).
 
 
 git(Dir, Args, Output) :-
-  git:git(Args, [directory(Dir),error(Error),output(Output)]),
+  git:git(Args, [directory(Dir),error(Error),output(Output),status(Status)]),
   debug(ppm(git), "~s", [Output]),
-  (Error == [] -> true ; ansi_format([fg(red)], "~s", [Error])).
+  (Error == [] -> true ; ansi_format([fg(red)], "~s", [Error])),
+  Status = exit(0).
 
 
 

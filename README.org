@@ -1,0 +1,44 @@
+#+TITLE: Prolog-Package-Manager (PPM)
+#+AUTHOR: Wouter Beek
+
+A very simple package manager for SWI-Prolog.
+
+Prolog Package Manager makes it easy to install Prolog code by using
+the Github service.
+
+* Publish a package
+
+Here is an example for user ~foo~ who publishes a package called
+~bar~:
+
+  1. The package is developed in a Git-controlled directory called
+     ~${home}/lib/swipl/pack/bar~.
+
+  2. The direcotry /must/ have a file called ~ppm.json~ which must
+     specify dependencies.  For example:
+
+     #+BEGIN_SRC json
+     {"dependencies": [
+       {"user": "wouterbeek", "repo": "Prolog-Library-Collection"}
+     ]}
+     #+END_SRC
+
+  3. Start PPM with ~$ swipl ppm.pl~
+
+  4. Run ~?- ppm_publish(bar, version(0,1,0)).~ which creates a
+     repository for ~bar~ in ~foo~'s Github account with a release
+     that has version number 0.1.0.
+
+* Install a package
+
+Somebody else can now install package ~foo~ from user ~bar~:
+
+  1. Start PPM with ~$swipl ppm.pl~
+
+  2. Run ~?- ppm_install(bar, foo).~
+
+Dependencies -- in this case ~Prolog-Library-Collection~ -- are
+installed as well.
+
+To verify that the package was installed successfully run ~?-
+ppm_list.~
