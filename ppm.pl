@@ -70,10 +70,7 @@ ppm_current(User, Repo, Version, Deps) :-
 
 ppm_install(User, Repo) :-
   ppm_current(User, Repo, CurrentVersion), !,
-  phrase(version(CurrentVersion), Codes),
-  format("Package ~a's ‘~a’ is already installed (version ~s)\n",
-         [User,Repo,Codes]),
-  format("Use ppm_update/1 to update a package.\n").
+  ppm_update(Repo).
 ppm_install(User, Repo) :-
   ppm_install(User, Repo, package).
 
