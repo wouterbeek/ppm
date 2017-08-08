@@ -1,6 +1,8 @@
 :- module(
   ppm,
   [
+    ppm_help/0,
+    ppm_install/1, % +File
     ppm_install/2, % +User, +Name
     ppm_list/0,
     ppm_publish/2, % +Name, +Version
@@ -63,13 +65,36 @@ ppm_current(User, Repo, Version, Deps) :-
 
 
 
+%! ppm_help is det.
+
+ppm_help :-
+  ansi_format([fg(green)], "Welcome "),
+  ansi_format([fg(red)], "to "),
+  ansi_format([fg(blue)], "Prolog "),
+  ansi_format([fg(yellow)], "Package "),
+  ansi_format([fg(magenta)], "Manager"),
+  format("!"),
+  nl,
+  format("We are so happy that you're here :-)"),
+  nl,
+  nl.
+
+
+
+%! ppm_install(+File:atom) is det.
 %! ppm_install(+User:atom, +Repo:atom) is semidet.
 %
 % Installs a package.  The latests version is chosen in case none is
 % specified.
 
+ppm_install(File) :-
+  conf_deps(File, Deps1),
+  collect_deps(Deps1, Deps2),
+  maplist(ppm_install_dependency, Deps2).
+
+
 ppm_install(User, Repo) :-
-  ppm_current(User, Repo, CurrentVersion), !,
+  ppm_current(User, Repo, _), !,
   ppm_update(Repo).
 ppm_install(User, Repo) :-
   ppm_install(User, Repo, package).
@@ -528,6 +553,18 @@ collect_deps([_|T1], T2, L) :-
 
 
 
+%! conf_deps(+File:atom, -Deps:list(dict)) is det.
+
+conf_deps(File, Deps) :-
+  setup_call_cleanup(
+    open(File, read, In),
+    json_read_dict(In, Dict, [value_string_as(atom)]),
+    close(In)
+  ),
+  get_dict(dependencies, Dict, [], Deps).
+
+
+
 %! git(+Dir:atom, +Arguments:list(atom)) is semidet.
 %! git(+Dir:atom, +Arguments:list(atom), -Output:list(code)) is semidet.
 
@@ -552,12 +589,7 @@ repo_deps(Repo, Deps) :-
     File,
     [access(read),extensions([json]),file_errors(fail),relative_to(Dir)]
   ),
-  setup_call_cleanup(
-    open(File, read, In),
-    json_read_dict(In, Dict, [value_string_as(atom)]),
-    close(In)
-  ),
-  get_dict(dependencies, Dict, [], Deps).
+  conf_deps(File, Deps).
 
 
 
@@ -640,6 +672,13 @@ github_tag(User, Repo, Tag) :-
 
 
 % GENERIC HELPERS %
+
+%! ansi_format(+Attr:list(term), +Format:string) is det.
+
+ansi_format(Attr, Format) :-
+  ansi_format(Attr, Format, []).
+
+
 
 %! directory_file(+Dir:atom, -File:atom) is nondet.
 
