@@ -90,9 +90,8 @@ ppm_help :-
 % specified.
 
 ppm_install(File) :-
-  conf_deps(File, Deps1),
-  collect_deps(Deps1, Deps2),
-  maplist(ppm_install_dependency, Deps2).
+  conf_deps(File, Deps),
+  maplist(ppm_install_dependency, Deps).
 
 
 ppm_install(User, Repo) :-
@@ -104,9 +103,8 @@ ppm_install(User, Repo) :-
 ppm_install(User, Repo, Kind) :-
   github_version_latest(User, Repo, Version), !,
   github_clone_version(User, Repo, Version),
-  repo_deps(Repo, Deps1),
-  collect_deps(Deps1, Deps2),
-  maplist(ppm_install_dependency, Deps2),
+  repo_deps(Repo, Deps),
+  maplist(ppm_install_dependency, Deps),
   phrase(version(Version), Codes),
   ansi_format(
     [fg(green)],
@@ -230,8 +228,7 @@ ppm_update(Repo) :-
 ppm_update(Repo, Kind) :-
   ppm_current(User, Repo, CurrentVersion, Deps1),
   % update existing dependencies
-  collect_deps(Deps1, Deps2),
-  maplist(ppm_update_dependency, Deps2),
+  maplist(ppm_update_dependency, Deps1),
   % update the package itself
   github_version_latest(User, Repo, LatestVersion),
   (   CurrentVersion == LatestVersion
@@ -243,10 +240,9 @@ ppm_update(Repo, Kind) :-
       ppm_install(User, Repo)
   ),
   % install new dependencies
-  ppm_current(User, Repo, LatestVersion, Deps3),
-  collect_deps(Deps3, Deps4),
-  ord_subtract(Deps4, Deps2, Deps5),
-  maplist(ppm_install_dependency, Deps5),
+  ppm_current(User, Repo, LatestVersion, Deps2),
+  ord_subtract(Deps2, Deps1, Deps3),
+  maplist(ppm_install_dependency, Deps3),
   % informational
   phrase(version(CurrentVersion), Codes1),
   phrase(version(LatestVersion), Codes2),
@@ -548,36 +544,16 @@ github_version_latest(User, Repo, LatestVersion) :-
 
 % PPM-SPECIFIC HELPERS %
 
-%! collect_deps(+Deps1:list(dict), -Deps2:ordset(dict)) is det.
+%! conf_deps(+File:atom, -Deps:ordset(dict)) is det.
 
-collect_deps(L1, L2) :-
-  collect_deps(L1, [], L2).
-
-
-collect_deps([], L, Set) :- !,
-  list_to_ord_set(L, Set).
-collect_deps([H|T1], T2, L) :-
-  get_dict(name, H, Repo),
-  repo_dir(Repo, RepoDir),
-  exists_directory(RepoDir), !,
-  collect_deps(T1, T2, L).
-collect_deps([H|T1], T2, L) :-
-  \+ memberchk(H, T2), !,
-  collect_deps(T1, [H|T2], L).
-collect_deps([_|T1], T2, L) :-
-  collect_deps(T1, T2, L).
-
-
-
-%! conf_deps(+File:atom, -Deps:list(dict)) is det.
-
-conf_deps(File, Deps) :-
+conf_deps(File, Deps2) :-
   setup_call_cleanup(
     open(File, read, In),
     json_read_dict(In, Dict, [value_string_as(atom)]),
     close(In)
   ),
-  get_dict(dependencies, Dict, [], Deps).
+  get_dict(dependencies, Dict, [], Deps1),
+  list_to_ord_set(Deps1, Deps2).
 
 
 
