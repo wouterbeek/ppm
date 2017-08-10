@@ -1,4 +1,3 @@
 #!/bin/bash
 
-curl -s https://github.com/wouterbeek/Get-Into-Prolog/gip.sh;
-./gip.sh
+source <(curl -s https://raw.githubusercontent.com/wouterbeek/Get-Into-Prolog/master/gip.sh)
