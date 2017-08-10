@@ -210,8 +210,11 @@ ppm_remove(Repo) :-
 
 ppm_run(Repo) :-
   repo_dir(Repo, RepoDir),
-  absolute_file_name(run, File,
-                     [access(read),file_errors(fail),file_type(prolog)]),
+  absolute_file_name(
+    run,
+    File,
+    [access(read),file_errors(fail),file_type(prolog),relative_to(RepoDir)]
+  ),
   consult(File).
 
 
