@@ -7,6 +7,7 @@
     ppm_list/0,
     ppm_publish/3, % +User, +Name, +Version
     ppm_remove/1,  % +Name
+    ppm_run/1,     % +Name
     ppm_update/1,  % +Name
     ppm_updates/0
   ]
@@ -17,7 +18,7 @@
 A very simple package manager for SWI-Prolog.
 
 @author Wouter Beek
-@version 2017/06, 2017/08
+@version 2017/08
 */
 
 :- use_module(library(aggregate)).
@@ -202,6 +203,16 @@ ppm_remove(Repo) :-
   delete_directory_and_contents(RepoDir),
   phrase(version(Version), Codes),
   format("Deleted package ‘~a’ (version ~s).", [Repo,Codes]).
+
+
+
+%! ppm_run(+Name:atom) is semidet.
+
+ppm_run(Repo) :-
+  repo_dir(Repo, RepoDir),
+  absolute_file_name(run, File,
+                     [access(read),file_errors(fail),file_type(prolog)]),
+  consult(File).
 
 
 
