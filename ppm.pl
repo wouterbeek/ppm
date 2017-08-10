@@ -95,11 +95,11 @@ ppm_install(File) :-
 
 
 ppm_install(User, Repo) :-
-  ppm_current(User, Repo, _), !,
-  ppm_update(Repo).
-ppm_install(User, Repo) :-
   ppm_install(User, Repo, package).
 
+ppm_install(User, Repo, Kind) :-
+  ppm_current(User, Repo, _), !,
+  ppm_update(Repo, Kind).
 ppm_install(User, Repo, Kind) :-
   github_version_latest(User, Repo, Version), !,
   github_clone_version(User, Repo, Version),
@@ -231,25 +231,26 @@ ppm_update(Repo, Kind) :-
   maplist(ppm_update_dependency, Deps1),
   % update the package itself
   github_version_latest(User, Repo, LatestVersion),
-  (   CurrentVersion == LatestVersion
-  ->  (   Kind == package
+  (   compare_version(<, CurrentVersion, LatestVersion)
+  ->  ppm_remove(Repo),
+      ppm_install(User, Repo),
+      % informational
+      phrase(version(CurrentVersion), Codes1),
+      phrase(version(LatestVersion), Codes2),
+      format("Updated ‘~a’: ~s → ~s\n", [Repo,Codes1,Codes2])
+  ;   % informational
+      (   Kind == package
       ->  format("No need to update ~a ‘~a’.\n", [Kind,Repo])
       ;   true
       )
-  ;   ppm_remove(Repo),
-      ppm_install(User, Repo)
   ),
   % install new dependencies
   ppm_current(User, Repo, LatestVersion, Deps2),
   ord_subtract(Deps2, Deps1, Deps3),
-  maplist(ppm_install_dependency, Deps3),
-  % informational
-  phrase(version(CurrentVersion), Codes1),
-  phrase(version(LatestVersion), Codes2),
-  format("Updated ‘~a’: ~s → ~s\n", [Repo,Codes1,Codes2]).
+  maplist(ppm_install_dependency, Deps3).
 
 ppm_update_dependency(Dep) :-
-  get_dict(repo, Dep, Repo),
+  get_dict(name, Dep, Repo),
   ppm_update(Repo, dependency).
 
 
