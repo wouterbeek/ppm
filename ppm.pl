@@ -33,6 +33,7 @@ A very simple package manager for SWI-Prolog.
 :- use_module(library(lists)).
 :- use_module(library(option)).
 :- use_module(library(ordsets)).
+:- use_module(library(prolog_pack)).
 :- use_module(library(readutil)).
 :- use_module(library(uri)).
 
@@ -731,5 +732,4 @@ is_dummy_file(..).
 % Creates PackDir in case it does not yet exist.
 
 pack_dir(PackDir) :-
-  absolute_file_name(pack(.), PackDir, [access(write),file_type(directory)]),
-  (exists_directory(PackDir) -> true ; make_directory_path(PackDir)).
+  prolog_pack:pack_install_dir(PackDir, [interactive(false)]).
