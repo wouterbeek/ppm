@@ -5,7 +5,7 @@
     ppm_install/1, % +File
     ppm_install/2, % +User, +Name
     ppm_list/0,
-    ppm_publish/2, % +Name, +Version
+    ppm_publish/3, % +User, +Name, +Version
     ppm_remove/1,  % +Name
     ppm_update/1,  % +Name
     ppm_updates/0
@@ -152,9 +152,9 @@ ppm_list_dep_row(Dep) :-
 
 
 
-%! ppm_publish(+Name:atom, +Version(compound)) is det.
+%! ppm_publish(+User:atom, +Name:atom, +Version(compound)) is det.
 
-ppm_publish(Repo, LocalVersion) :-
+ppm_publish(User, Repo, LocalVersion) :-
   repo_dir(Repo, RepoDir),
   git_remote_uri(RepoDir, Uri), !,
   github_remote_uri(Uri, User, Repo),
@@ -181,12 +181,12 @@ ppm_publish(Repo, LocalVersion) :-
   ),
   % create the Github release
   github_create_release(User, Repo, Tag).
-ppm_publish(Repo, LocalVersion) :-
+ppm_publish(User, Repo, LocalVersion) :-
   github_create_repository(Repo, Uri),
   repo_dir(Repo, RepoDir),
   git_add_remote_uri(RepoDir, Uri),
   git_initial_push(RepoDir),
-  ppm_publish(Repo, LocalVersion).
+  ppm_publish(User, Repo, LocalVersion).
 
 
 
@@ -413,7 +413,7 @@ github_create_release(User, Repo, Tag) :-
 
 
 
-%! github_create_repository(+Repo:atom, -Uri:atom) is det.
+%! github_create_repository+Repo:atom, -Uri:atom) is det.
 
 github_create_repository(Repo, Uri) :-
   github_open_authorized([user,repos], [post(json(_{name: Repo}))], 201, In),
@@ -490,7 +490,8 @@ github_open_authorized_options(Options1, Options2) :-
 github_remote_uri(Uri, User, Repo) :-
   uri_components(Uri, Comps),
   uri_data(path, Comps, Path),
-  atomic_list_concat(['',User,Repo], /, Path).
+  file_name_extension(Base, _, Path),
+  atomic_list_concat(['',User,Repo], /, Base).
 
 
 
