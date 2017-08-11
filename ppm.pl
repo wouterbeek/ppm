@@ -34,6 +34,7 @@ A very simple package manager for SWI-Prolog.
 :- use_module(library(lists)).
 :- use_module(library(option)).
 :- use_module(library(ordsets)).
+:- use_module(library(os_ext)).
 :- use_module(library(prolog_pack)).
 :- use_module(library(readutil)).
 :- use_module(library(uri)).
@@ -208,13 +209,14 @@ ppm_remove(Repo) :-
 
 ppm_run(Repo) :-
   repo_dir(Repo, RepoDir),
-  (   absolute_file_name(
-        run,
-        File,
-        [access(read),file_errors(fail),file_type(prolog),relative_to(RepoDir)]
+  (   file_by_name(RepoDir, 'run.pl', RunFile)
+  ->  consult(RunFile),
+      (   file_by_name(RepoDir, 'conf.json', ConfFile)
+      ->  set_cli_arguments([conf(ConfFile)])
+      ;   true
       )
-  ->  consult(File)
-  ;   ansi_format([fg(red)], "Package ‘~a’ is not currently installed.\n", [Repo])
+  ;   ansi_format([fg(red)], "Package ‘~a’ is not currently installed.\n",
+                  [Repo])
   ).
 
 
@@ -560,6 +562,17 @@ conf_deps(File, Deps2) :-
 
 
 
+% file_by_name(+Directory:atom, +File:atom, -Path:atom) is semidet.
+
+file_by_name(Dir, File, Path) :-
+  absolute_file_name(
+    File,
+    Path,
+    [access(read),file_errors(fail),relative_to(Dir)]
+  ).
+
+
+
 %! git(+Dir:atom, +Arguments:list(atom)) is semidet.
 %! git(+Dir:atom, +Arguments:list(atom), -Output:list(code)) is semidet.
 
@@ -579,11 +592,7 @@ git(Dir, Args, Output) :-
 
 repo_deps(Repo, Deps) :-
   repo_dir(Repo, Dir),
-  absolute_file_name(
-    ppm,
-    File,
-    [access(read),extensions([json]),file_errors(fail),relative_to(Dir)]
-  ),
+  file_by_name(Dir, 'ppm.json', File),
   conf_deps(File, Deps).
 
 
@@ -596,11 +605,7 @@ repo_dir(Repo, RepoDir) :-
   (   var(Repo)
   ->  directory_path(PackDir, RepoDir)
   ;   directory_file_path(PackDir, Repo, RepoDir),
-      absolute_file_name(
-        RepoDir,
-        _,
-        [access(read),file_errors(fail),file_type(directory)]
-      )
+      exists_directory(RepoDir)
   ),
   is_git_directory(RepoDir).
 
@@ -610,11 +615,7 @@ repo_dir(Repo, RepoDir) :-
 
 repo_is_prolog_pack(Repo) :-
   repo_dir(Repo, RepoDir),
-  absolute_file_name(
-    pack,
-    _,
-    [access(read),file_type(prolog),file_errors(fail),relative_to(RepoDir)]
-  ).
+  file_by_name(RepoDir, 'pack.pl', _).
 
 
 
