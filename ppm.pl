@@ -209,12 +209,13 @@ ppm_remove(Repo) :-
 
 ppm_run(Repo) :-
   repo_dir(Repo, RepoDir),
+  % Load the local configuration file, if available.
+  (   file_by_name(RepoDir, 'conf.json', ConfFile)
+  ->  set_cli_arguments([conf(ConfFile)])
+  ;   true
+  ),
   (   file_by_name(RepoDir, 'run.pl', RunFile)
-  ->  consult(RunFile),
-      (   file_by_name(RepoDir, 'conf.json', ConfFile)
-      ->  set_cli_arguments([conf(ConfFile)])
-      ;   true
-      )
+  ->  consult(RunFile)
   ;   ansi_format([fg(red)], "Package ‘~a’ is not currently installed.\n",
                   [Repo])
   ).
