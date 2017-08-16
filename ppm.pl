@@ -285,9 +285,9 @@ ppm_updates_row(update(User,Repo,CurrentVersion,Order,LatestVersion)) :-
   order_colors(Order, Color1, Color2),
   phrase(version(CurrentVersion), CurrentCodes),
   ansi_format([fg(Color1)], "~s", [CurrentCodes]),
-  format("\t»\t"),
+  format("»"),
   phrase(version(LatestVersion), LatestCodes),
-  ansi_format([fg(Color2)], "~s", [LatestCodes]).
+  ansi_format([fg(Color2)], "~s\n", [LatestCodes]).
 
 order_colors(<, red, green).
 order_colors(>, green, red).
