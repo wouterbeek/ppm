@@ -101,7 +101,7 @@ ppm_install(User, Repo) :-
 
 ppm_install(User, Repo, Kind) :-
   ppm_current(User, Repo, _), !,
-  ppm_update(Repo, Kind).
+  ppm_update(User, Repo, Kind).
 ppm_install(User, Repo, Kind) :-
   github_version_latest(User, Repo, Version), !,
   github_clone_version(User, Repo, Version),
@@ -249,15 +249,15 @@ ppm_sync_(Root) :-
 
 
 
-%! ppm_update(+Name:atom) is semidet.
+%! ppm_update(+User, +Repo:atom) is semidet.
 %
 % Updates an exisiting package and all of its dependencies.
 
-ppm_update(Repo) :-
-  ppm_update(Repo, package).
+ppm_update(User, Repo) :-
+  ppm_update(User, Repo, package).
 
 
-ppm_update(Repo, Kind) :-
+ppm_update(User, Repo, Kind) :-
   ppm_current(User, Repo, CurrentVersion, Dependencies1),
   % update existing dependencies
   maplist(ppm_update_dependency, Dependencies1),
@@ -282,8 +282,8 @@ ppm_update(Repo, Kind) :-
   maplist(ppm_install_dependency, Dependencies3).
 
 ppm_update_dependency(Dependency) :-
-  get_dict(name, Dependency, Repo),
-  ppm_update(Repo, dependency).
+  _{user: User, repo: Repo} :< Dependency,
+  ppm_update(User, Repo, dependency).
 
 
 
