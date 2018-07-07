@@ -2,13 +2,13 @@
   ppm,
   [
     ppm_help/0,
-    ppm_install/1, % +File
-    ppm_install/2, % +User, +Name
+    ppm_install/2, % +User, +Repo
     ppm_list/0,
-    ppm_publish/3, % +User, +Name, +Version
-    ppm_remove/1,  % +Name
-    ppm_run/1,     % +Name
-    ppm_update/1,  % +Name
+    ppm_publish/3, % +User, +Repo, +Version
+    ppm_remove/2,  % +User, +Repo
+    ppm_run/2,     % +User, +Repo
+    ppm_sync/0,
+    ppm_update/2,  % +User, +Repo
     ppm_updates/0
   ]
 ).
@@ -45,6 +45,12 @@ A simple package manager for SWI-Prolog.
 :- debug(ppm(git)).
 :- debug(ppm(github)).
 
+:- initialization
+   init_ppm.
+
+:- meta_predicate
+    atom_phrase(//, ?).
+
 
 
 
@@ -57,7 +63,7 @@ A simple package manager for SWI-Prolog.
 % version number.
 
 ppm_current(User, Repo, Version) :-
-  repo_dir(Repo, RepoDir),
+  user_repo_dir(User, Repo, RepoDir),
   git_remote_uri(RepoDir, Uri),
   github_remote_uri(Uri, User, Repo),
   git_current_version(RepoDir, Version).
@@ -65,7 +71,7 @@ ppm_current(User, Repo, Version) :-
 
 ppm_current(User, Repo, Version, Dependencies) :-
   ppm_current(User, Repo, Version),
-  repo_deps(Repo, Dependencies).
+  repo_deps(User, Repo, Dependencies).
 
 
 
@@ -85,16 +91,10 @@ ppm_help :-
 
 
 
-%! ppm_install(+File:atom) is det.
 %! ppm_install(+User:atom, +Repo:atom) is semidet.
 %
 % Installs a package.  The latests version is chosen in case none is
 % specified.
-
-ppm_install(File) :-
-  conf_deps(File, Dependencies),
-  maplist(ppm_install_dependency, Dependencies).
-
 
 ppm_install(User, Repo) :-
   ppm_install(User, Repo, package).
@@ -105,7 +105,7 @@ ppm_install(User, Repo, Kind) :-
 ppm_install(User, Repo, Kind) :-
   github_version_latest(User, Repo, Version), !,
   github_clone_version(User, Repo, Version),
-  repo_deps(Repo, Dependencies),
+  repo_deps(User, Repo, Dependencies),
   maplist(ppm_install_dependency, Dependencies),
   phrase(version(Version), Codes),
   ansi_format(
@@ -156,7 +156,7 @@ ppm_list_dep_row(Dependency) :-
 %! ppm_publish(+User:atom, +Name:atom, +Version(compound)) is det.
 
 ppm_publish(User, Repo, LocalVersion) :-
-  repo_dir(Repo, RepoDir),
+  user_repo_dir(User, Repo, RepoDir),
   git_remote_uri(RepoDir, Uri), !,
   github_remote_uri(Uri, User, Repo),
   % make sure the local version is set as a Git tag
@@ -183,40 +183,68 @@ ppm_publish(User, Repo, LocalVersion) :-
   github_create_release(User, Repo, Tag).
 ppm_publish(User, Repo, LocalVersion) :-
   github_create_repository(Repo, Uri),
-  repo_dir(Repo, RepoDir),
+  user_repo_dir(User, Repo, RepoDir),
   git_add_remote_uri(RepoDir, Uri),
   git_initial_push(RepoDir),
   ppm_publish(User, Repo, LocalVersion).
 
 
 
-%! ppm_remove(+Name:atom) is det.
+%! ppm_remove(+User:atom, +Repo:atom) is det.
 %
 % Removes a package.
 %
 % TBD: Support for removing otherwise unused dependencies.
 
-ppm_remove(Repo) :-
-  ppm_current(_, Repo, Version),
-  repo_dir(Repo, RepoDir),
+ppm_remove(User, Repo) :-
+  ppm_current(User, Repo, Version),
+  user_repo_dir(User, Repo, RepoDir),
   delete_directory_and_contents(RepoDir),
   phrase(version(Version), Codes),
-  format("Deleted package ‘~a’ (version ~s).", [Repo,Codes]).
+  format("Deleted package ‘~a/~a’ (version ~s).", [User,Repo,Codes]).
 
 
 
-%! ppm_run(+Name:atom) is semidet.
+%! ppm_run(+User:atom, +Repo:atom) is semidet.
 
-ppm_run(Repo) :-
-  repo_dir(Repo, RepoDir),
+ppm_run(User, Repo) :-
+  user_repo_dir(User, Repo, Dir),
+  /*
   % Load the local configuration file, if available.
   (   file_by_name(RepoDir, 'conf.json', ConfFile)
   ->  set_cli_arguments([conf(ConfFile)])
   ;   true
   ),
-  (   file_by_name(RepoDir, 'run.pl', RunFile)
-  ->  consult(RunFile)
-  ;   ansi_format([fg(red)], "Package ‘~a’ is not currently installed.\n", [Repo])
+  */
+  (   file_by_name(Dir, 'run.pl', File)
+  ->  consult(File)
+  ;   ansi_format([fg(red)], "Package ‘~a/~a’ is currently not installed.\n", [User,Repo])
+  ).
+
+
+
+%! ppm_sync is det.
+%
+% Synchronizes the packages the current Prolog session has access to
+% the to packages stored in `~/.ppm'.
+
+ppm_sync :-
+  ppm_directory(Root),
+  ppm_sync_(Root).
+
+ppm_sync_(Root) :-
+  assertz(user:file_search_path(ppm, Root)),
+  forall(
+    user_repo_dir(User, Repo, _),
+    (
+      atomic_list_concat([User,Repo,prolog], /, Spec),
+      absolute_file_name(
+        Spec,
+        _,
+        [access(read),file_type(directory),relative_to(Root)]
+      ),
+      assertz(user:file_search_path(library, ppm(Spec)))
+    )
   ).
 
 
@@ -236,7 +264,7 @@ ppm_update(Repo, Kind) :-
   % update the package itself
   github_version_latest(User, Repo, LatestVersion),
   (   compare_version(<, CurrentVersion, LatestVersion)
-  ->  ppm_remove(Repo),
+  ->  ppm_remove(User, Repo),
       ppm_install(User, Repo),
       % informational
       phrase(version(CurrentVersion), Codes1),
@@ -347,29 +375,28 @@ version(version(Major,Minor,Patch)) -->
 
 % VC: Git %
 
-%! git_add_remote_uri(+Dir:atom, +Uri:atom) is det.
+%! git_add_remote_uri(+Directory:atom, +Uri:atom) is det.
 
 git_add_remote_uri(Dir, Uri) :-
   git(Dir, [remote,add,origin,Uri]).
 
 
 
-%! git_clone_tag(+Uri:atom, +Tag:atom) is det.
+%! git_clone_tag(+Directory:atom, +Uri:atom, +Tag:atom) is det.
 
-git_clone_tag(Uri, Tag) :-
-  pack_dir(PackDir),
-  git(PackDir, [clone,Uri,'--branch',Tag,'--depth',1]).
-
+git_clone_tag(Dir, Uri, Tag) :-
+  git(Dir, [clone,Uri,'--branch',Tag,'--depth',1]).
 
 
-%! git_initial_push(+Dir:atom) is det.
+
+%! git_initial_push(+Directory:atom) is det.
 
 git_initial_push(Dir) :-
   git(Dir, [push,'-u',origin,master]).
 
 
 
-%! git_create_tag(+Dir:atom, +Tag:atom) is det.
+%! git_create_tag(+Directory:atom, +Tag:atom) is det.
 
 git_create_tag(Dir, Tag) :-
   git_tag(Dir, Tag), !.
@@ -379,21 +406,16 @@ git_create_tag(Dir, Tag) :-
 
 
 
-%! git_current_version(+Dir:atom, -Version:compound) is det.
+%! git_current_version(+Directory:atom, -Version:compound) is det.
 
 git_current_version(Dir, Version) :-
   % Git returns error code 128 when there are no tags
-  catch(git(Dir, [describe,'--tags'], Codes), E, fail_on(128, E)),
+  git(Dir, [describe,'--tags'], Codes),
   phrase(version(Version), Codes, _Rest).
 
-fail_on(Status, error(process_error(git(_),exit(Status)),_)) :- !,
-  fail.
-fail_on(_, E) :-
-  throw(E).
 
 
-
-%! git_remote_uri(+Dir:atom, -Uri:atom) is det.
+%! git_remote_uri(+Directory:atom, -Uri:atom) is det.
 
 git_remote_uri(Dir, Uri) :-
   git(Dir, [config,'--get','remote.origin.url'], Codes),
@@ -412,7 +434,8 @@ github_clone_version(User, Repo, Version) :-
   atom_phrase(version(Version), Tag),
   atomic_list_concat(['',User,Repo], /, Path),
   uri_components(Uri, uri_components(https,'github.com',Path,_,_)),
-  git_clone_tag(Uri, Tag).
+  user_dir(User, Dir),
+  git_clone_tag(Dir, Uri, Tag).
 
 
 
@@ -534,7 +557,7 @@ github_version(User, Repo, Version, Id) :-
     close(In)
   ),
   member(Dict, Dicts),
-  phrase(version(Version), Dict.tag_name),
+  atom_phrase(version(Version), Dict.tag_name),
   Id = Dict.id.
 
 
@@ -586,40 +609,57 @@ git(Dir, Args) :-
 
 git(Dir, Args, Output) :-
   git:git(Args, [directory(Dir),error(Error),output(Output),status(Status)]),
-  debug(ppm(git), "~s", [Output]),
-  (Error == [] -> true ; ansi_format([fg(red)], "~s", [Error])),
+  (   Error == []
+  ->  debug(ppm(git), "~s", [Output])
+  ;   ansi_format([fg(red)], "~s", [Error])
+  ),
   Status = exit(0).
 
 
 
-%! repo_deps(+Repo:atom, -Dependencies:list(dict)) is semidet.
+%! repo_deps(+User:atom, +Repo:atom, -Dependencies:list(dict)) is semidet.
 
-repo_deps(Repo, Dependencies) :-
-  repo_dir(Repo, Dir),
+repo_deps(User, Repo, Dependencies) :-
+  user_repo_dir(User, Repo, Dir),
   file_by_name(Dir, 'ppm.json', File),
   conf_deps(File, Dependencies).
 
 
 
-%! repo_dir(+Repo:atom, -Dir:atom) is semidet.
-%! repo_dir(-Repo:atom, -Dir:atom) is nondet.
+%! user_dir(+User:atom, -Directory:atom) is det.
 
-repo_dir(Repo, RepoDir) :-
-  pack_dir(PackDir),
-  (   var(Repo)
-  ->  directory_path(PackDir, RepoDir)
-  ;   directory_file_path(PackDir, Repo, RepoDir),
-      exists_directory(RepoDir)
+user_dir(User, Dir) :-
+  ppm_directory(Root),
+  directory_file_path(Root, User, Dir),
+  ensure_directory_exists(Dir).
+
+
+
+%! user_repo_dir(+User:atom, +Repo:atom, -Dir:atom) is semidet.
+%! user_repo_dir(+User:atom, -Repo:atom, -Dir:atom) is nondet.
+%! user_repo_dir(-User:atom, -Repo:atom, -Dir:atom) is nondet.
+
+user_repo_dir(User, Repo, RepoDir) :-
+  ppm_directory(Root),
+  % User directory.
+  (   var(User)
+  ->  directory_files(Root, Users),
+      member(User, Users),
+      \+ is_dummy_file(User)
+  ;   true
   ),
-  is_git_directory(RepoDir).
-
-
-
-%! repo_is_prolog_pack(+Repo:atom) is semidet.
-
-repo_is_prolog_pack(Repo) :-
-  repo_dir(Repo, RepoDir),
-  file_by_name(RepoDir, 'pack.pl', _).
+  directory_file_path(Root, User, UserDir),
+  % Repository directory.
+  (   var(Repo)
+  ->  directory_files(UserDir, Repos),
+      member(Repo, Repos),
+      \+ is_dummy_file(Repo)
+  ;   true
+  ),
+  directory_file_path(UserDir, Repo, RepoDir),
+  is_git_directory(RepoDir),
+  % A package file must be present.
+  absolute_file_name('ppm.json', _, [access(read),relative_to(RepoDir)]).
 
 
 
@@ -683,8 +723,13 @@ ansi_format(Attr, Format) :-
 
 
 
-%! atom_phrase(:Dcg_o, -Atom:atom) is det.
+%! atom_phrase(:Dcg_0, +Atom:atom) is det.
+%! atom_phrase(:Dcg_0, -Atom:atom) is det.
 
+atom_phrase(Dcg_0, Atom) :-
+  atom(Atom), !,
+  atom_codes(Atom, Codes),
+  phrase(Dcg_0, Codes).
 atom_phrase(Dcg_0, Atom) :-
   phrase(Dcg_0, Codes),
   atom_codes(Atom, Codes).
@@ -716,11 +761,27 @@ directory_path(Dir, Path) :-
 
 
 
+%! ensure_directory_exists(+Directory:atom) is det.
+
+ensure_directory_exists(Dir) :-
+  exists_directory(Dir), !.
+ensure_directory_exists(Dir) :-
+  make_directory(Dir).
+
+
+
 %! get_dict(?Key, +Dict, +Default, -Value) is det.
 
 get_dict(Key, Dict, _, Value) :-
   get_dict(Key, Dict, Value), !.
 get_dict(_, _, Value, Value).
+
+
+
+%! home_directory(-Directory:atom) is det.
+
+home_directory(Dir) :-
+  expand_file_name('~', [Dir|_]).
 
 
 
@@ -734,12 +795,31 @@ is_dummy_file(..).
 
 
 
-%! pack_dir(-PackDir:atom) is det.
+%! pack_directory(-Directory:atom) is det.
+
+pack_directory(Dir) :-
+  prolog_pack:pack_install_dir(Dir, [interactive(false)]).
+
+
+
+%! ppm_directory(-Directory:atom) is det.
 %
-% @arg PackDir is bound to the directory used to store SWI packages
+% @arg Directory is bound to the directory used to store SWI packages
 %      in.
 %
-% Creates PackDir in case it does not yet exist.
+% Creates Directory in case it does not yet exist.
 
-pack_dir(PackDir) :-
-  prolog_pack:pack_install_dir(PackDir, [interactive(false)]).
+ppm_directory(Dir) :-
+  home_directory(Dir0),
+  directory_file_path(Dir0, '.ppm', Dir).
+
+
+
+
+
+% INITIALIZATION %
+
+init_ppm :-
+  ppm_directory(Root),
+  ensure_directory_exists(Root),
+  ppm_sync_(Root).
