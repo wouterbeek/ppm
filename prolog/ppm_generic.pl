@@ -11,7 +11,7 @@
     ensure_directory_exists/1, % +Directory
     file_by_name/2,            % +Directory, +File
     file_by_name/3,            % +Directory, +File, -Path
-    ppm_dependencies/3,        % +User, +Repo, -Dependencies
+    ppm_dependencies/2,        % +Directory, -Dependencies
     repository_directory/3,    % +User, +Repo, -Directory
     root_directory/1,          % -Root
     user_directory/2,          % +User, -Directory
@@ -27,6 +27,7 @@
 
 :- use_module(library(ansi_term)).
 :- use_module(library(dcg/basics)).
+:- use_module(library(git)).
 :- use_module(library(http/json)).
 :- use_module(library(filesex)).
 :- use_module(library(lists)).
@@ -179,10 +180,9 @@ is_dummy_file(..).
 
 
 
-%! ppm_dependencies(+User:atom, +Repo:atom, -Dependencies:ordset(dict)) is semidet.
+%! ppm_dependencies(+Directory:atom, -Dependencies:ordset(dict)) is semidet.
 
-ppm_dependencies(User, Repo, Dependencies2) :-
-  repository_directory(User, Repo, Dir),
+ppm_dependencies(Dir, Dependencies2) :-
   file_by_name(Dir, 'ppm.json', File),
   setup_call_cleanup(
     open(File, read, In),
@@ -207,11 +207,17 @@ root_directory(Dir) :-
 
 
 
-%! repository_directory(+User:atom, +Repo:atom, -Dir:atom) is semidet.
-%! repository_directory(+User:atom, -Repo:atom, -Dir:atom) is nondet.
-%! repository_directory(-User:atom, -Repo:atom, -Dir:atom) is nondet.
+%! repository_directory(+User:atom, +Repo:atom, -Directory:atom) is semidet.
+%! repository_directory(+User:atom, -Repo:atom, -Directory:atom) is nondet.
+%! repository_directory(-User:atom, -Repo:atom, -Directory:atom) is nondet.
 
-repository_directory(User, Repo, RepoDir) :-
+repository_directory(User, Repo, Dir) :-
+  repository_directory_(User, Repo, Dir),
+  is_git_directory(Dir),
+  % A package file must be present.
+  file_by_name(Dir, 'ppm.json').
+
+repository_directory_(User, Repo, RepoDir) :-
   root_directory(Root),
   % User directory.
   (   var(User)
@@ -228,10 +234,7 @@ repository_directory(User, Repo, RepoDir) :-
       \+ is_dummy_file(Repo)
   ;   true
   ),
-  directory_file_path(UserDir, Repo, RepoDir),
-  is_git_directory(RepoDir),
-  % A package file must be present.
-  file_by_name(RepoDir, 'ppm.json').
+  directory_file_path(UserDir, Repo, RepoDir).
 
 
 

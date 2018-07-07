@@ -92,7 +92,7 @@ github_uri(User, Repo, Uri) :-
 %! github_version(+User:atom, +Repo:atom, -Version:compound) is nondet.
 
 github_version(User, Repo, Version) :-
-  github_open_authorized([repos,User,Repo,tags], [], 200, In),
+  github_open([repos,User,Repo,tags], [], 200, In),
   call_cleanup(
     json_read_dict(In, Dicts, [value_string_as(atom)]),
     close(In)

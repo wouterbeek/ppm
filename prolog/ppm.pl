@@ -26,6 +26,7 @@ A simple package manager for SWI-Prolog.
 :- use_module(library(aggregate)).
 :- use_module(library(apply)).
 :- use_module(library(filesex)).
+:- use_module(library(git)).
 :- use_module(library(http/http_json), []).
 :- use_module(library(prolog_pack), []).
 
@@ -40,30 +41,13 @@ A simple package manager for SWI-Prolog.
 
 
 
-%! ppm_current(?User:atom, ?Repo:atom, ?Version:compound) is nondet.
-%! ppm_current(?User:atom, ?Repo:atom, ?Version:compound,
-%!             -Dependencies:list(dict)) is nondet.
-%
-% Enumerates currently installed packages together with their semantic
-% version number.
-
-ppm_current(User, Repo, Version) :-
-  repository_directory(User, Repo, Dir),
-  git_current_version(Dir, Version).
-
-
-ppm_current(User, Repo, Version, Dependencies) :-
-  ppm_current(User, Repo, Version),
-  ppm_dependencies(User, Repo, Dependencies).
-
-
-
 %! ppm_current_update(?User:atom, ?Repo:atom, -CurrentVersion:compound,
 %!                    -LatestVersion:compound) is nondet.
 
 ppm_current_update(User, Repo, CurrentVersion, LatestVersion) :-
-  ppm_current(User, Repo, CurrentVersion),
-  github_version_latest(User, Repo, LatestVersion),
+  repository_directory(User, Repo, Dir),
+  git_current_version(Dir, CurrentVersion),
+  git_version_latest(Dir, LatestVersion),
   CurrentVersion \== LatestVersion.
 
 
@@ -93,27 +77,32 @@ ppm_install(User, Repo) :-
   ppm_install(User, Repo, package).
 
 ppm_install(User, Repo, Kind) :-
-  ppm_current(User, Repo, _), !,
+  repository_directory(User, Repo, _), !,
   ppm_update(User, Repo, Kind).
 ppm_install(User, Repo, Kind) :-
-  github_version_latest(User, Repo, Version), !,
-  github_clone_version(User, Repo, Version),
-  ppm_dependencies(User, Repo, Dependencies),
-  maplist(ppm_install_dependency, Dependencies),
-  phrase(version(Version), Codes),
-  ansi_format(
-    [fg(green)],
-    "Successfully installed ~a ‘~a’ (~s)\n",
-    [Kind,Repo,Codes]
-  ),
-  ppm_sync.
-ppm_install(User, Repo, Kind) :-
-  ansi_format(
-    [fg(red)],
-    "Could not find a version tag in ~a's ~a ‘~a’.",
-    [User,Kind,Repo]
-  ),
-  fail.
+  user_directory(User, UserDir),
+  (   github_version_latest(User, Repo, LatestVersion)
+  ->  github_uri(User, Repo, Uri),
+      git_clone(UserDir, Uri),
+      directory_file_path(UserDir, Repo, RepoDir),
+      git_checkout(RepoDir, version(LatestVersion)),
+      ppm_dependencies(RepoDir, Dependencies),
+      maplist(ppm_install_dependency, Dependencies),
+      phrase(version(LatestVersion), Codes),
+      ansi_format(
+        [fg(green)],
+        "Successfully installed ~a ‘~a’ (~s)\n",
+        [Kind,Repo,Codes]
+      ),
+      ppm_sync
+  ;   ansi_format(
+        [fg(red)],
+        "Could not find a version tag in ~a's ~a ‘~a’.",
+        [User,Kind,Repo]
+      ),
+      nl,
+      fail
+  ).
 
 ppm_install_dependency(Dependency) :-
   _{user: User, repo: Repo} :< Dependency,
@@ -128,7 +117,11 @@ ppm_install_dependency(Dependency) :-
 ppm_list :-
   aggregate_all(
     set(package(User,Repo,Version,Dependencies)),
-    ppm_current(User, Repo, Version, Dependencies),
+    (
+      repository_directory(User, Repo, Dir),
+      git_current_version(Dir, Version),
+      ppm_dependencies(Dir, Dependencies)
+    ),
     Packages
   ),
   (   Packages == []
@@ -154,9 +147,9 @@ ppm_list_dep_row(Dependency) :-
 % TBD: Support for removing otherwise unused dependencies.
 
 ppm_remove(User, Repo) :-
-  ppm_current(User, Repo, Version),
-  repository_directory(User, Repo, RepoDir),
-  delete_directory_and_contents(RepoDir),
+  repository_directory(User, Repo, Dir),
+  git_current_version(Dir, Version),
+  delete_directory_and_contents(Dir),
   phrase(version(Version), Codes),
   format("Deleted package ‘~a/~a’ (~s).", [User,Repo,Codes]).
 
@@ -166,13 +159,6 @@ ppm_remove(User, Repo) :-
 
 ppm_run(User, Repo) :-
   repository_directory(User, Repo, Dir),
-  /*
-  % Load the local configuration file, if available.
-  (   file_by_name(RepoDir, 'conf.json', ConfFile)
-  ->  set_cli_arguments([conf(ConfFile)])
-  ;   true
-  ),
-  */
   (   file_by_name(Dir, 'run.pl', File)
   ->  consult(File)
   ;   ansi_format([fg(red)], "Package ‘~a/~a’ is currently not installed.\n", [User,Repo])
@@ -220,28 +206,25 @@ ppm_update(User, Repo) :-
 
 
 ppm_update(User, Repo, Kind) :-
-  ppm_current(User, Repo, CurrentVersion, Dependencies1),
-  % update existing dependencies
-  maplist(ppm_update_dependency, Dependencies1),
-  % update the package itself
-  github_version_latest(User, Repo, LatestVersion),
+  repository_directory(User, Repo, Dir),
+  git_fetch(Dir),
+  git_current_version(Dir, CurrentVersion),
+  git_version_latest(Dir, LatestVersion),
   (   compare_version(<, CurrentVersion, LatestVersion)
-  ->  ppm_remove(User, Repo),
-      ppm_install(User, Repo),
+  ->  git_checkout(Dir, version(LatestVersion)),
       % informational
       phrase(version(CurrentVersion), Codes1),
       phrase(version(LatestVersion), Codes2),
-      format("Updated ‘~a’: ~s → ~s\n", [Repo,Codes1,Codes2])
+      format("Updated ‘~a/~a’: ~s → ~s\n", [User,Repo,Codes1,Codes2])
   ;   % informational
       (   Kind == package
-      ->  format("No need to update ~a ‘~a’.\n", [Kind,Repo])
+      ->  format("No need to update ~a ‘~a/~a’.\n", [Kind,User,Repo])
       ;   true
       )
   ),
-  % install new dependencies
-  ppm_current(User, Repo, LatestVersion, Dependencies2),
-  ord_subtract(Dependencies2, Dependencies1, Dependencies3),
-  maplist(ppm_install_dependency, Dependencies3),
+  % Update the dependencies after updating the main package.
+  ppm_dependencies(Dir, Dependencies),
+  maplist(ppm_install_dependency, Dependencies),
   ppm_sync.
 
 ppm_update_dependency(Dependency) :-

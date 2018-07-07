@@ -2,14 +2,18 @@
   ppm_git,
   [
     git_add_remote_uri/2,  % +Directory, +Uri
-    git_clone_tag/3,       % +Directory, +Uri, +Tag
+    git_checkout/2,        % +Directory, +TagOrVersion
+    git_clone/2,           % +Directory, +Uri
     git_create_tag/2,      % +Directory, +Tag
     git_current_version/2, % +Directory, -Version
     git_delete_tag/2,      % +Directory, +Tag
+    git_fetch/1,           % +Directory
     git_initial_push/1,    % +Directory
     git_remote_exists/1,   % +Uri
     git_remote_uri/2,      % +Directory, -Uri
-    git_tag/2              % +Directory, ?Tag
+    git_tag/2,             % +Directory, -Tag
+    git_version/2,         % +Directory, -Version
+    git_version_latest/2   % +Directory, -LatestVersion
   ]
 ).
 
@@ -40,10 +44,20 @@ git_add_remote_uri(Dir, Uri) :-
 
 
 
-%! git_clone_tag(+Directory:atom, +Uri:atom, +Tag:atom) is det.
+%! git_checkout(+Directory:atom, +TagOrVersion:compound) is det.
 
-git_clone_tag(Dir, Uri, Tag) :-
-  git(Dir, [clone,Uri,'--branch',Tag,'--depth',1]).
+git_checkout(Dir, tag(Tag)) :- !,
+  git(Dir, [checkout,'-b',Tag,Tag]).
+git_checkout(Dir, version(Version)) :-
+  atom_phrase(version(Version), Tag),
+  git_checkout(Dir, tag(Tag)).
+
+
+
+%! git_clone(+Directory:atom, +Uri:atom) is det.
+
+git_clone(Dir, Uri) :-
+  git(Dir, [clone,Uri]).
 
 
 
@@ -72,6 +86,13 @@ git_delete_tag(Dir, Tag) :-
   git(Dir, [tag,'-d',Tag]),
   atom_concat(':refs/tags/', Tag, Arg),
   git(Dir, [push,origin,Arg]).
+
+
+
+%! git_fetch(+Directory:atom) is det.
+
+git_fetch(Dir) :-
+  git(Dir, [fetch]).
 
 
 
@@ -112,6 +133,25 @@ git_tag(Dir, Tag) :-
       Tag \== ''
   ;   memberchk(Tag, Tags)
   ).
+
+
+
+%! git_version(+Direction:atom, +Version:compound) is semidet.
+%! git_version(+Direction:atom, -Version:compound) is nondet.
+
+git_version(Dir, Version) :-
+  git_tag(Dir, Tag),
+  atom_phrase(version(Version), Tag).
+
+
+
+%! git_version_latest(+Directory:atom, +Version:compound) is semidet.
+%! git_version_latest(+Directory:atom, -Version:compound) is semidet.
+
+git_version_latest(Dir, Version) :-
+  aggregate_all(set(Version), git_version(Dir, Version), Versions),
+  predsort(compare_version, Versions, SortedVersions),
+  last(SortedVersions, Version).
 
 
 
