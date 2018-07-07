@@ -1,38 +1,44 @@
 #+author: Wouter Beek
 #+title: Prolog-Package-Manager (PPM)
 
-A very simple package manager for SWI-Prolog.
+A package manager for SWI-Prolog.
 
-Prolog Package Manager makes it easy to install Prolog code by using
-the Github service.
+Prolog Package Manager (PPM) makes it easy to install Prolog code by
+using the Github service.  The only requirements are that (i) the
+repository is open / publicly available, (ii) contains a ~/prolog~
+folder with Prolog module files, and (iii) has a ~ppm.json~ file
+specifying its dependencies.
 
-* Installing PPM
+* Instal PPM
 
   1. Install a recent version of [[http://www.swi-prolog][SWI-Prolog]].
-  2. Run SWI-Prolog and use the built-in package manager to install
-     PPM: ~pack_install('git://github.com/wouterbeek/ppm').~
+  2. Start Prolog and call the following goal:
+     ~pack_install('git://github.com/wouterbeek/Prolog-Package-Manager').~
 
-* Installing a package with PPM
+* Install a package through PPM
 
-Suppose you want to install package ~foo~ from user ~bar~, published
-at https://github.com/foo/bar:
+Suppose you want to install package ~Prolog-Library-Collection~ from
+user ~wouterbeek~, published at
+https://github.com/wouterbeek/Prolog-Library-Collection:
 
   1. Run SWI-Prolog and load PPM: ~[library(ppm)].~
-  2. Run ~ppm_install(bar, foo).~
-
-Call the following to verify that the package was installed
-successfully: ~ppm_list.~
+  2. Run ~ppm_install(wouterbeek, 'Prolog-Library-Collection').~
+  3. In order to access package modules from the Prolog library path,
+     PPM must be loaded first (see step 1).  You automate this step by
+     adding the following line to the Prolog startup file
+     (~~/.swiplrc~): ~:- use_module(library(ppm)).~
+  4. Package modules can now be loaded from the Prolog library path.
+     (E.g., ~[library(atom_ext)].~ loads a specific module from the
+     [[https://github.com/wouterbeek/Prolog-Library-Collection][Prolog-Library-Collection]].)
 
 * Publish a package through PPM
 
-Here is an example for user ~foo~ who publishes a package called
-~bar~:
+Suppose that user ~foo~ wants to publish a package called ~bar~:
 
-  1. Develop the package locally in a Git-controlled directory called
-     ~${home}/lib/swipl/pack/bar~.
+  1. Develop the package locally in a Git-controlled directory.
 
-  2. The direcotry /must/ have a file called ~ppm.json~ which must
-     specify any dependencies.  For example:
+  2. Make sure the direcotry contains a file called ~ppm.json~ that
+     specifies its dependencies (if any).  For example:
 
      #+BEGIN_SRC json
      {"dependencies": [
@@ -40,7 +46,8 @@ Here is an example for user ~foo~ who publishes a package called
      ]}
      #+END_SRC
 
-  3. Run SWI-Prolog and load PPM: ~[library(ppm)].~
+  3. Start Prolog and load PPM: ~[library(ppm)].~ (For convenience,
+     this line can be added to the Prolog startup file: ~~/.swiplrc~)
 
-  4. Publish a version of your package with the following call:
-     ~ppm_publish(bar, version(0,1,0)).~
+  4. Publish a specific version of your package with the following
+     call: ~ppm_publish(bar, version(0,1,0)).~
