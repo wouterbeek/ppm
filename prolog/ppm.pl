@@ -234,6 +234,7 @@ ppm_update_dependency(Dependency) :-
 % Shows packages, if any, that can be updated using ppm_update/1.
 
 ppm_updates :-
+  format("Checking for updates…\n\n"),
   aggregate_all(
     set(update(User,Repo,CurrentVersion,Order,LatestVersion)),
     (
@@ -244,17 +245,23 @@ ppm_updates :-
     ),
     Updates
   ),
-  (   Updates == []
-  ->  format("No updates available.\n")
-  ;   maplist(ppm_updates_row, Updates)
-  ).
+  pp_available_updates(Updates),
+  maplist(ppm_updates_row, Updates).
+
+pp_available_updates([]) :- !,
+  format("No updates available.\n").
+pp_available_updates([_]) :- !,
+  format("1 update available:\n").
+length(Updates) :-
+  length(Updates, N),
+  format("~D updates available:\n", [N]).
 
 ppm_updates_row(update(User,Repo,CurrentVersion,Order,LatestVersion)) :-
-  format("~a\t~a\t", [User,Repo]),
+  format("  • ~a/~a\t", [User,Repo]),
   order_colors(Order, Color1, Color2),
   phrase(version(CurrentVersion), CurrentCodes),
   ansi_format([fg(Color1)], "~s", [CurrentCodes]),
-  format("»"),
+  format(" → "),
   phrase(version(LatestVersion), LatestCodes),
   ansi_format([fg(Color2)], "~s\n", [LatestCodes]).
 

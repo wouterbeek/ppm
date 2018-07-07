@@ -15,6 +15,10 @@
 
 /** <module> Prolog Package Manager (PPM): Git support
 
+Debug flag: `ppm(git)'.
+
+---
+
 @author Wouter Beek
 @version 2017-2018
 */
@@ -24,8 +28,6 @@
 :- use_module(library(git), []).
 
 :- use_module(library(ppm_generic)).
-
-:- debug(ppm(git)).
 
 
 
