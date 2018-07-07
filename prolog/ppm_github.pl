@@ -17,6 +17,7 @@
 @version 2017-2018
 */
 
+:- use_module(library(aggregate)).
 :- use_module(library(debug)).
 :- use_module(library(http/http_open)).
 :- use_module(library(http/json)).
@@ -106,8 +107,7 @@ github_version(User, Repo, Version) :-
     close(In)
   ),
   member(Dict, Dicts),
-  atom_phrase(version(Version), Dict.tag_name),
-  Id = Dict.id.
+  atom_phrase(version(Version), Dict.tag_name).
 
 
 

@@ -98,7 +98,7 @@ ppm_install(User, Repo, Kind) :-
 ppm_install(User, Repo, Kind) :-
   ansi_format(
     [fg(red)],
-    "Cannot find a version of ~a's ~a ‘~a’.",
+    "Could find a version tag in ~a's ~a ‘~a’.",
     [User,Kind,Repo]
   ),
   fail.
