@@ -46,6 +46,7 @@ A simple package manager for SWI-Prolog.
 
 ppm_current_update(User, Repo, CurrentVersion, LatestVersion) :-
   repository_directory(User, Repo, Dir),
+  git_fetch(Dir),
   git_current_version(Dir, CurrentVersion),
   git_version_latest(Dir, LatestVersion),
   CurrentVersion \== LatestVersion.
