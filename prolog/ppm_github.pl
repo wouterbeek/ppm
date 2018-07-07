@@ -5,7 +5,6 @@
     github_create_release/3,    % +User. +Repo, +Tag
     github_create_repository/2, % +Repo, -Uri
     github_delete_version/3,    % +User, +Repo, +Version
-    github_tag_latest/3,        % +User, +Repo, ?Tag
     github_uri/3,               % +User, +Repo, -Uri
     github_version_latest/3     % +User, +Repo, -Version
   ]
@@ -76,30 +75,6 @@ github_delete_version(User, Repo, Version) :-
 
 
 
-%! github_tag(+User:atom, +Repo:atom, +Tag:atom) is semidet.
-%! github_tag(+User:atom, +Repo:atom, -Tag:atom) is nondet.
-
-github_tag(User, Repo, Tag) :-
-  github_open([repos,User,Repo,tags], [], 200, In),
-  call_cleanup(
-    json_read_dict(In, Dicts, [value_string_as(atom)]),
-    close(In)
-  ),
-  member(Dict, Dicts),
-  Tag = Dict.name.
-
-
-
-%! github_tag_latest(+User:atom, +Repo:atom, +Tag:atom) is semidet.
-%! github_tag_latest(+User:atom, +Repo:atom, -Tag:atom) is nondet.
-
-github_tag_latest(User, Repo, Tag) :-
-  aggregate_all(set(Tag), github_tag(User, Repo, Tag), Tags),
-  predsort(compare_version, Tags, SortedTags),
-  last(SortedTags, Tag).
-
-
-
 %! github_uri(+User:atom, +Repo:atom, -Uri:atom) is det.
 
 github_uri(User, Repo, Uri) :-
@@ -108,26 +83,27 @@ github_uri(User, Repo, Uri) :-
 
 
 
-%! github_version(+User:atom, +Repo:atom, ?Version:compound) is nondet.
+%! github_version(+User:atom, +Repo:atom, +Version:compound) is semidet.
+%! github_version(+User:atom, +Repo:atom, -Version:compound) is nondet.
 
 github_version(User, Repo, Version) :-
-  github_open([repos,User,Repo,releases], [], 200, In),
+  github_open([repos,User,Repo,tags], [], 200, In),
   call_cleanup(
     json_read_dict(In, Dicts, [value_string_as(atom)]),
     close(In)
   ),
   member(Dict, Dicts),
-  atom_phrase(version(Version), Dict.tag_name).
+  atom_phrase(version(Version), Dict.name).
 
 
 
-%! github_version_latest(+User:atom, +Repo:atom,
-%!                       -LatestVersion:compound) is det.
+%! github_version_latest(+User:atom, +Repo:atom, +Version:compound) is semidet.
+%! github_version_latest(+User:atom, +Repo:atom, -Version:compound) is nondet.
 
-github_version_latest(User, Repo, LatestVersion) :-
+github_version_latest(User, Repo, Version) :-
   aggregate_all(set(Version), github_version(User, Repo, Version), Versions),
   predsort(compare_version, Versions, SortedVersions),
-  last(SortedVersions, LatestVersion).
+  last(SortedVersions, Version).
 
 
 

@@ -39,8 +39,8 @@ A simple package manager for SWI-Prolog.
 
 
 
-%! ppm_current(?User:atom, ?Name:atom, ?Version:compound) is nondet.
-%! ppm_current(?User:atom, ?Name:atom, ?Version:compound,
+%! ppm_current(?User:atom, ?Repo:atom, ?Version:compound) is nondet.
+%! ppm_current(?User:atom, ?Repo:atom, ?Version:compound,
 %!             -Dependencies:list(dict)) is nondet.
 %
 % Enumerates currently installed packages together with their semantic
@@ -85,7 +85,7 @@ ppm_install(User, Repo, Kind) :-
   ppm_current(User, Repo, _), !,
   ppm_update(User, Repo, Kind).
 ppm_install(User, Repo, Kind) :-
-  github_tag_latest(User, Repo, Version), !,
+  github_version_latest(User, Repo, Version), !,
   github_clone_version(User, Repo, Version),
   ppm_dependencies(User, Repo, Dependencies),
   maplist(ppm_install_dependency, Dependencies),
@@ -104,7 +104,7 @@ ppm_install(User, Repo, Kind) :-
   fail.
 
 ppm_install_dependency(Dependency) :-
-  _{name: Repo, user: User} :< Dependency,
+  _{user: User, repo: Repo} :< Dependency,
   ppm_install(User, Repo, dependency).
 
 
@@ -130,7 +130,7 @@ ppm_list_row(package(User,Repo,Version,Dependencies)) :-
   maplist(ppm_list_dep_row, Dependencies).
 
 ppm_list_dep_row(Dependency) :-
-  _{name: Repo, user: User} :< Dependency,
+  _{user: User, repo: Repo} :< Dependency,
   format("  ⤷ ~a/~a\n", [User,Repo]).
 
 
@@ -203,7 +203,7 @@ ppm_update(User, Repo, Kind) :-
   % update existing dependencies
   maplist(ppm_update_dependency, Dependencies1),
   % update the package itself
-  github_tag_latest(User, Repo, LatestVersion),
+  github_version_latest(User, Repo, LatestVersion),
   (   compare_version(<, CurrentVersion, LatestVersion)
   ->  ppm_remove(User, Repo),
       ppm_install(User, Repo),
@@ -237,7 +237,7 @@ ppm_updates :-
     set(update(User,Repo,CurrentVersion,Order,LatestVersion)),
     (
       ppm_current(User, Repo, CurrentVersion),
-      github_tag_latest(User, Repo, LatestVersion),
+      github_version_latest(User, Repo, LatestVersion),
       compare_version(Order, CurrentVersion, LatestVersion),
       Order \== =
     ),
