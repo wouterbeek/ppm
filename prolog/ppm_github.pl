@@ -5,7 +5,7 @@
     github_create_release/3,    % +User. +Repo, +Tag
     github_create_repository/2, % +Repo, -Uri
     github_delete_version/3,    % +User, +Repo, +Version
-    github_tag/3,               % +User, +Repo, ?Tag
+    github_tag_latest/3,        % +User, +Repo, ?Tag
     github_uri/3,               % +User, +Repo, -Uri
     github_version_latest/3     % +User, +Repo, -Version
   ]
@@ -87,6 +87,16 @@ github_tag(User, Repo, Tag) :-
   ),
   member(Dict, Dicts),
   Tag = Dict.name.
+
+
+
+%! github_tag_latest(+User:atom, +Repo:atom, +Tag:atom) is semidet.
+%! github_tag_latest(+User:atom, +Repo:atom, -Tag:atom) is nondet.
+
+github_tag_latest(User, Repo, Tag) :-
+  aggregate_all(set(Tag), github_tag(User, Repo, Tag), Tags),
+  predsort(compare_version, Tags, SortedTags),
+  last(SortedTags, Tag).
 
 
 

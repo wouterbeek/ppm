@@ -85,7 +85,7 @@ ppm_install(User, Repo, Kind) :-
   ppm_current(User, Repo, _), !,
   ppm_update(User, Repo, Kind).
 ppm_install(User, Repo, Kind) :-
-  github_version_latest(User, Repo, Version), !,
+  github_tag_latest(User, Repo, Version), !,
   github_clone_version(User, Repo, Version),
   ppm_dependencies(User, Repo, Dependencies),
   maplist(ppm_install_dependency, Dependencies),
@@ -203,7 +203,7 @@ ppm_update(User, Repo, Kind) :-
   % update existing dependencies
   maplist(ppm_update_dependency, Dependencies1),
   % update the package itself
-  github_version_latest(User, Repo, LatestVersion),
+  github_tag_latest(User, Repo, LatestVersion),
   (   compare_version(<, CurrentVersion, LatestVersion)
   ->  ppm_remove(User, Repo),
       ppm_install(User, Repo),
@@ -237,7 +237,7 @@ ppm_updates :-
     set(update(User,Repo,CurrentVersion,Order,LatestVersion)),
     (
       ppm_current(User, Repo, CurrentVersion),
-      github_version_latest(User, Repo, LatestVersion),
+      github_tag_latest(User, Repo, LatestVersion),
       compare_version(Order, CurrentVersion, LatestVersion),
       Order \== =
     ),
