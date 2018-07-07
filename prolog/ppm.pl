@@ -608,6 +608,11 @@ git(Dir, Args) :-
 
 
 git(Dir, Args, Output) :-
+  (   debugging(ppm(git))
+  ->  atomic_list_concat([git|Args], ' ', Cmd),
+      debug(ppm(git), "~a", [Cmd])
+  ;   true
+  ),
   git:git(Args, [directory(Dir),error(Error),output(Output),status(Status)]),
   (   Error == []
   ->  debug(ppm(git), "~s", [Output])
