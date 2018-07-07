@@ -110,7 +110,7 @@ ppm_install(User, Repo, Kind) :-
   phrase(version(Version), Codes),
   ansi_format(
     [fg(green)],
-    "Successfully installed ~a ‘~a’, version ~s\n",
+    "Successfully installed ~a ‘~a’ (~s)\n",
     [Kind,Repo,Codes]
   ).
 ppm_install(User, Repo, Kind) :-
@@ -201,7 +201,7 @@ ppm_remove(User, Repo) :-
   user_repo_dir(User, Repo, RepoDir),
   delete_directory_and_contents(RepoDir),
   phrase(version(Version), Codes),
-  format("Deleted package ‘~a/~a’ (version ~s).", [User,Repo,Codes]).
+  format("Deleted package ‘~a/~a’ (~s).", [User,Repo,Codes]).
 
 
 
