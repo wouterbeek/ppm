@@ -94,11 +94,12 @@ ppm_install(User, Repo, Kind) :-
     [fg(green)],
     "Successfully installed ~a ‘~a’ (~s)\n",
     [Kind,Repo,Codes]
-  ).
+  ),
+  ppm_sync.
 ppm_install(User, Repo, Kind) :-
   ansi_format(
     [fg(red)],
-    "Could find a version tag in ~a's ~a ‘~a’.",
+    "Could not find a version tag in ~a's ~a ‘~a’.",
     [User,Kind,Repo]
   ),
   fail.
