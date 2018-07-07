@@ -12,6 +12,7 @@
     file_by_name/2,            % +Directory, +File
     file_by_name/3,            % +Directory, +File, -Path
     ppm_dependencies/3,        % +User, +Repo, -Dependencies
+    read_line_to_atom/2,       % +In, -Atom
     repository_directory/3,    % +User, +Repo, -Directory
     root_directory/1,          % -Root
     user_directory/2,          % +User, -Directory
@@ -31,7 +32,7 @@
 :- use_module(library(filesex)).
 :- use_module(library(lists)).
 :- use_module(library(ordsets)).
-
+:- use_module(library(readutil)).
 
 :- meta_predicate
     atom_phrase(//, ?).
@@ -192,6 +193,14 @@ ppm_dependencies(User, Repo, Dependencies2) :-
   ),
   get_dict(dependencies, Dict, [], Dependencies1),
   list_to_ord_set(Dependencies1, Dependencies2).
+
+
+
+%! read_line_to_atom(+In:stream, -Line:atom) is det.
+
+read_line_to_atom(In, Atom) :-
+  read_line_to_codes(In, Codes),
+  atom_codes(Atom, Codes).
 
 
 
