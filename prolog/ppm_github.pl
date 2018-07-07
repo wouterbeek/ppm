@@ -26,10 +26,6 @@
 
 :- debug(ppm(github)).
 
-:- thread_local
-   password/1,
-   user/1.
-
 
 
 
