@@ -1,9 +1,9 @@
 author('Wouter Beek', 'wouter@triply.cc').
-download('https://github.com/wouterbeek/Prolog-Package-Manager/release/*.zip').
-home('https://github.com/wouterbeek/Prolog-Package-Manager').
+download('https://github.com/wouterbeek/ppm/release/*.zip').
+home('https://github.com/wouterbeek/ppm').
 keywords(['package manager','Prolog']).
 maintainer('Wouter Beek', 'wouter@triply.cc').
-name('Prolog-Package-Manager').
+name(ppm).
 packager('Wouter Beek', 'wouter@triply.cc').
-title('A very simple package manager for SWI-Prolog').
-version('0.0.1').
+title('A simple package manager for SWI-Prolog.').
+version('0.0.0').

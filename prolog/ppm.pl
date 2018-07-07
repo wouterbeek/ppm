@@ -15,10 +15,12 @@
 
 /** <module> Prolog Package Manager (PPM)
 
-A very simple package manager for SWI-Prolog.
+A simple package manager for SWI-Prolog.
+
+---
 
 @author Wouter Beek
-@version 2017/08
+@version 2017-2018
 */
 
 :- use_module(library(aggregate)).
@@ -34,8 +36,7 @@ A very simple package manager for SWI-Prolog.
 :- use_module(library(lists)).
 :- use_module(library(option)).
 :- use_module(library(ordsets)).
-:- use_module(library(os_ext)).
-:- use_module(library(prolog_pack)).
+:- use_module(library(prolog_pack), []).
 :- use_module(library(readutil)).
 :- use_module(library(uri)).
 
@@ -50,7 +51,7 @@ A very simple package manager for SWI-Prolog.
 
 %! ppm_current(?User:atom, ?Name:atom, ?Version:compound) is nondet.
 %! ppm_current(?User:atom, ?Name:atom, ?Version:compound,
-%!             -Deps:list(dict)) is nondet.
+%!             -Dependencies:list(dict)) is nondet.
 %
 % Enumerates currently installed packages together with their semantic
 % version number.
@@ -62,9 +63,9 @@ ppm_current(User, Repo, Version) :-
   git_current_version(RepoDir, Version).
 
 
-ppm_current(User, Repo, Version, Deps) :-
+ppm_current(User, Repo, Version, Dependencies) :-
   ppm_current(User, Repo, Version),
-  repo_deps(Repo, Deps).
+  repo_deps(Repo, Dependencies).
 
 
 
@@ -91,8 +92,8 @@ ppm_help :-
 % specified.
 
 ppm_install(File) :-
-  conf_deps(File, Deps),
-  maplist(ppm_install_dependency, Deps).
+  conf_deps(File, Dependencies),
+  maplist(ppm_install_dependency, Dependencies).
 
 
 ppm_install(User, Repo) :-
@@ -104,8 +105,8 @@ ppm_install(User, Repo, Kind) :-
 ppm_install(User, Repo, Kind) :-
   github_version_latest(User, Repo, Version), !,
   github_clone_version(User, Repo, Version),
-  repo_deps(Repo, Deps),
-  maplist(ppm_install_dependency, Deps),
+  repo_deps(Repo, Dependencies),
+  maplist(ppm_install_dependency, Dependencies),
   phrase(version(Version), Codes),
   ansi_format(
     [fg(green)],
@@ -120,8 +121,8 @@ ppm_install(User, Repo, Kind) :-
   ),
   fail.
 
-ppm_install_dependency(Dep) :-
-  _{name: Repo, user: User} :< Dep,
+ppm_install_dependency(Dependency) :-
+  _{name: Repo, user: User} :< Dependency,
   ppm_install(User, Repo, dependency).
 
 
@@ -132,8 +133,8 @@ ppm_install_dependency(Dep) :-
 
 ppm_list :-
   aggregate_all(
-    set(package(User,Repo,Version,Deps)),
-    ppm_current(User, Repo, Version, Deps),
+    set(package(User,Repo,Version,Dependencies)),
+    ppm_current(User, Repo, Version, Dependencies),
     Packages
   ),
   (   Packages == []
@@ -141,13 +142,13 @@ ppm_list :-
   ;   maplist(ppm_list_row, Packages)
   ).
 
-ppm_list_row(package(User,Repo,Version,Deps)) :-
+ppm_list_row(package(User,Repo,Version,Dependencies)) :-
   phrase(version(Version), Codes),
   format("~a/~a (~s)\n", [User,Repo,Codes]),
-  maplist(ppm_list_dep_row, Deps).
+  maplist(ppm_list_dep_row, Dependencies).
 
-ppm_list_dep_row(Dep) :-
-  _{name: Repo, user: User} :< Dep,
+ppm_list_dep_row(Dependency) :-
+  _{name: Repo, user: User} :< Dependency,
   format("  ⤷ ~a/~a\n", [User,Repo]).
 
 
@@ -159,8 +160,7 @@ ppm_publish(User, Repo, LocalVersion) :-
   git_remote_uri(RepoDir, Uri), !,
   github_remote_uri(Uri, User, Repo),
   % make sure the local version is set as a Git tag
-  phrase(version(LocalVersion), Codes),
-  atom_codes(Tag, Codes),
+  atom_phrase(version(LocalVersion), Tag),
   git_create_tag(RepoDir, Tag),
   % make sure the local version is ahead of the remote version
   (   github_version_latest(User, Repo, RemoteVersion)
@@ -216,8 +216,7 @@ ppm_run(Repo) :-
   ),
   (   file_by_name(RepoDir, 'run.pl', RunFile)
   ->  consult(RunFile)
-  ;   ansi_format([fg(red)], "Package ‘~a’ is not currently installed.\n",
-                  [Repo])
+  ;   ansi_format([fg(red)], "Package ‘~a’ is not currently installed.\n", [Repo])
   ).
 
 
@@ -231,9 +230,9 @@ ppm_update(Repo) :-
 
 
 ppm_update(Repo, Kind) :-
-  ppm_current(User, Repo, CurrentVersion, Deps1),
+  ppm_current(User, Repo, CurrentVersion, Dependencies1),
   % update existing dependencies
-  maplist(ppm_update_dependency, Deps1),
+  maplist(ppm_update_dependency, Dependencies1),
   % update the package itself
   github_version_latest(User, Repo, LatestVersion),
   (   compare_version(<, CurrentVersion, LatestVersion)
@@ -250,12 +249,12 @@ ppm_update(Repo, Kind) :-
       )
   ),
   % install new dependencies
-  ppm_current(User, Repo, LatestVersion, Deps2),
-  ord_subtract(Deps2, Deps1, Deps3),
-  maplist(ppm_install_dependency, Deps3).
+  ppm_current(User, Repo, LatestVersion, Dependencies2),
+  ord_subtract(Dependencies2, Dependencies1, Dependencies3),
+  maplist(ppm_install_dependency, Dependencies3).
 
-ppm_update_dependency(Dep) :-
-  get_dict(name, Dep, Repo),
+ppm_update_dependency(Dependency) :-
+  get_dict(name, Dependency, Repo),
   ppm_update(Repo, dependency).
 
 
@@ -410,8 +409,7 @@ git_remote_uri(Dir, Uri) :-
 %! github_clone_version(+User:atom, +Repo:atom, +Version:compound) is det.
 
 github_clone_version(User, Repo, Version) :-
-  phrase(version(Version), Codes),
-  atom_codes(Tag, Codes),
+  atom_phrase(version(Version), Tag),
   atomic_list_concat(['',User,Repo], /, Path),
   uri_components(Uri, uri_components(https,'github.com',Path,_,_)),
   git_clone_tag(Uri, Tag).
@@ -433,7 +431,10 @@ github_create_release(User, Repo, Tag) :-
 
 github_create_repository(Repo, Uri) :-
   github_open_authorized([user,repos], [post(json(_{name: Repo}))], 201, In),
-  call_cleanup(json_read_dict(In, Dict, [value_string_as(atom)]), close(In)),
+  call_cleanup(
+    json_read_dict(In, Dict, [value_string_as(atom)]),
+    close(In)
+  ),
   Uri = Dict.html_url.
 
 
@@ -528,10 +529,12 @@ github_version(User, Repo, Version) :-
 
 github_version(User, Repo, Version, Id) :-
   github_open([repos,User,Repo,releases], [], 200, In),
-  call_cleanup(json_read_dict(In, Dicts, [value_string_as(atom)]), close(In)),
+  call_cleanup(
+    json_read_dict(In, Dicts, [value_string_as(atom)]),
+    close(In)
+  ),
   member(Dict, Dicts),
-  atom_codes(Dict.tag_name, Codes),
-  phrase(version(Version), Codes),
+  phrase(version(Version), Dict.tag_name),
   Id = Dict.id.
 
 
@@ -550,16 +553,16 @@ github_version_latest(User, Repo, LatestVersion) :-
 
 % PPM-SPECIFIC HELPERS %
 
-%! conf_deps(+File:atom, -Deps:ordset(dict)) is det.
+%! conf_deps(+File:atom, -Dependencies:ordset(dict)) is det.
 
-conf_deps(File, Deps2) :-
+conf_deps(File, Dependencies2) :-
   setup_call_cleanup(
     open(File, read, In),
     json_read_dict(In, Dict, [value_string_as(atom)]),
     close(In)
   ),
-  get_dict(dependencies, Dict, [], Deps1),
-  list_to_ord_set(Deps1, Deps2).
+  get_dict(dependencies, Dict, [], Dependencies1),
+  list_to_ord_set(Dependencies1, Dependencies2).
 
 
 
@@ -589,12 +592,12 @@ git(Dir, Args, Output) :-
 
 
 
-%! repo_deps(+Repo:atom, -Deps:list(dict)) is semidet.
+%! repo_deps(+Repo:atom, -Dependencies:list(dict)) is semidet.
 
-repo_deps(Repo, Deps) :-
+repo_deps(Repo, Dependencies) :-
   repo_dir(Repo, Dir),
   file_by_name(Dir, 'ppm.json', File),
-  conf_deps(File, Deps).
+  conf_deps(File, Dependencies).
 
 
 
@@ -660,7 +663,10 @@ github_delete_version(User, Repo, Version) :-
 
 github_tag(User, Repo, Tag) :-
   github_open([repos,User,Repo,tags], [], 200, In),
-  call_cleanup(json_read_dict(In, Dicts, [value_string_as(atom)]), close(In)),
+  call_cleanup(
+    json_read_dict(In, Dicts, [value_string_as(atom)]),
+    close(In)
+  ),
   member(Dict, Dicts),
   Tag = Dict.name.
 
@@ -674,6 +680,14 @@ github_tag(User, Repo, Tag) :-
 
 ansi_format(Attr, Format) :-
   ansi_format(Attr, Format, []).
+
+
+
+%! atom_phrase(:Dcg_o, -Atom:atom) is det.
+
+atom_phrase(Dcg_0, Atom) :-
+  phrase(Dcg_0, Codes),
+  atom_codes(Atom, Codes).
 
 
 

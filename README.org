@@ -1,21 +1,38 @@
-#+TITLE: Prolog-Package-Manager (PPM)
-#+AUTHOR: Wouter Beek
+#+author: Wouter Beek
+#+title: Prolog-Package-Manager (PPM)
 
 A very simple package manager for SWI-Prolog.
 
 Prolog Package Manager makes it easy to install Prolog code by using
 the Github service.
 
-* Publish a package
+* Installing PPM
+
+  1. Install a recent version of [[http://www.swi-prolog][SWI-Prolog]].
+  2. Run SWI-Prolog and use the built-in package manager to install
+     PPM: ~pack_install('git://github.com/wouterbeek/ppm').~
+
+* Installing a package with PPM
+
+Suppose you want to install package ~foo~ from user ~bar~, published
+at https://github.com/foo/bar:
+
+  1. Run SWI-Prolog and load PPM: ~[library(ppm)].~
+  2. Run ~ppm_install(bar, foo).~
+
+Call the following to verify that the package was installed
+successfully: ~ppm_list.~
+
+* Publish a package through PPM
 
 Here is an example for user ~foo~ who publishes a package called
 ~bar~:
 
-  1. The package is developed in a Git-controlled directory called
+  1. Develop the package locally in a Git-controlled directory called
      ~${home}/lib/swipl/pack/bar~.
 
   2. The direcotry /must/ have a file called ~ppm.json~ which must
-     specify dependencies.  For example:
+     specify any dependencies.  For example:
 
      #+BEGIN_SRC json
      {"dependencies": [
@@ -23,22 +40,7 @@ Here is an example for user ~foo~ who publishes a package called
      ]}
      #+END_SRC
 
-  3. Start PPM with ~$ swipl ppm.pl~
+  3. Run SWI-Prolog and load PPM: ~[library(ppm)].~
 
-  4. Run ~?- ppm_publish(bar, version(0,1,0)).~ which creates a
-     repository for ~bar~ in ~foo~'s Github account with a release
-     that has version number 0.1.0.
-
-* Install a package
-
-Somebody else can now install package ~foo~ from user ~bar~:
-
-  1. Start PPM with ~$swipl ppm.pl~
-
-  2. Run ~?- ppm_install(bar, foo).~
-
-Dependencies -- in this case ~Prolog-Library-Collection~ -- are
-installed as well.
-
-To verify that the package was installed successfully run ~?-
-ppm_list.~
+  4. Publish a version of your package with the following call:
+     ~ppm_publish(bar, version(0,1,0)).~
