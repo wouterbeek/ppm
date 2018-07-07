@@ -22,12 +22,17 @@
 :- use_module(library(http/json)).
 :- use_module(library(lists)).
 :- use_module(library(option)).
+:- use_module(library(readutil)).
 :- use_module(library(uri)).
 
 :- use_module(library(ppm_generic)).
 :- use_module(library(ppm_git)).
 
 :- debug(ppm(github)).
+
+:- thread_local
+   password/1,
+   user/1.
 
 
 
@@ -87,7 +92,7 @@ github_uri(User, Repo, Uri) :-
 %! github_version(+User:atom, +Repo:atom, -Version:compound) is nondet.
 
 github_version(User, Repo, Version) :-
-  github_open([repos,User,Repo,tags], [], 200, In),
+  github_open_authorized([repos,User,Repo,tags], [], 200, In),
   call_cleanup(
     json_read_dict(In, Dicts, [value_string_as(atom)]),
     close(In)
@@ -134,8 +139,20 @@ github_open(Segments, Options1, Status, In) :-
     Options1,
     Options2
   ),
-  http_open(Uri, In, Options2),
-  (debugging(http(receive_reply)) -> print_http_reply(Status, Headers) ; true).
+  catch(http_open(Uri, In, Options2), E, true),
+  (   var(E)
+  ->  (   debugging(http(receive_reply))
+      ->  print_http_reply(Status, Headers)
+      ;   true
+      )
+  ;   E = error(permission_error(url,_Uri),context(_,status(403,_)))
+  ->  % Unfortunately, library(http/http_open) throws away the reply
+      % body for non-2xx replies.  This may be due to Github rate
+      % limiting.
+      ansi_format([bg(red)], "Github operation forbidden.  Maybe rate limiting?"),
+      nl,
+      fail
+  ).
 
 print_http_reply(Status, Headers) :-
   debug(http(receive_reply), "~a", [Status]),
@@ -165,9 +182,22 @@ github_open_authorized(Segments, Options1, Status, In) :-
   github_open(Segments, Options2, Status, In).
 
 github_open_authorized_options(Options1, Options2) :-
-  ansi_format([fg(yellow)], "Github user name: "),
-  read_line_to_codes(user_input, Codes1),
-  ansi_format([fg(yellow)], "Github password: "),
-  read_line_to_codes(user_input, Codes2),
-  maplist(atom_codes, [User,Password], [Codes1,Codes2]),
+  github_user(User),
+  github_password(Password),
   merge_options([authorization(basic(User,Password))], Options1, Options2).
+
+github_password(Password) :-
+  password(Password),
+  nonvar(Password), !.
+github_password(Password) :-
+  ansi_format([fg(yellow)], "Github password: "),
+  read_line_to_string(user_input, Password),
+  assertz(password(Password)).
+
+github_user(User) :-
+  user(User),
+  nonvar(User), !.
+github_user(User) :-
+  ansi_format([fg(yellow)], "Github user name: "),
+  read_line_to_string(user_input, User),
+  assertz(user(User)).
