@@ -7,6 +7,7 @@
     ppm_remove/2,  % +User, +Repo
     ppm_run/2,     % +User, +Repo
     ppm_sync/0,
+    ppm_update/0,
     ppm_update/2,  % +User, +Repo
     ppm_updates/0
   ]
@@ -54,6 +55,16 @@ ppm_current(User, Repo, Version) :-
 ppm_current(User, Repo, Version, Dependencies) :-
   ppm_current(User, Repo, Version),
   ppm_dependencies(User, Repo, Dependencies).
+
+
+
+%! ppm_current_update(?User:atom, ?Repo:atom, -CurrentVersion:compound,
+%!                    -LatestVersion:compound) is nondet.
+
+ppm_current_update(User, Repo, CurrentVersion, LatestVersion) :-
+  ppm_current(User, Repo, CurrentVersion),
+  github_version_latest(User, Repo, LatestVersion),
+  CurrentVersion \== LatestVersion.
 
 
 
@@ -191,9 +202,18 @@ ppm_sync_(Root) :-
 
 
 
+%! ppm_update is semidet.
 %! ppm_update(+User, +Repo:atom) is semidet.
 %
 % Updates an exisiting package and all of its dependencies.
+
+ppm_update :-
+  ppm_updates_(Updates),
+  forall(
+    member(update(User,Repo,_,_), Updates),
+    ppm_update(User, Repo)
+  ).
+
 
 ppm_update(User, Repo) :-
   ppm_update(User, Repo, package).
@@ -221,7 +241,8 @@ ppm_update(User, Repo, Kind) :-
   % install new dependencies
   ppm_current(User, Repo, LatestVersion, Dependencies2),
   ord_subtract(Dependencies2, Dependencies1, Dependencies3),
-  maplist(ppm_install_dependency, Dependencies3).
+  maplist(ppm_install_dependency, Dependencies3),
+  ppm_sync.
 
 ppm_update_dependency(Dependency) :-
   _{user: User, repo: Repo} :< Dependency,
@@ -235,29 +256,28 @@ ppm_update_dependency(Dependency) :-
 
 ppm_updates :-
   format("Checking for updates…\n\n"),
-  aggregate_all(
-    set(update(User,Repo,CurrentVersion,Order,LatestVersion)),
-    (
-      ppm_current(User, Repo, CurrentVersion),
-      github_version_latest(User, Repo, LatestVersion),
-      compare_version(Order, CurrentVersion, LatestVersion),
-      Order \== =
-    ),
-    Updates
-  ),
+  ppm_updates_(Updates),
   pp_available_updates(Updates),
   maplist(ppm_updates_row, Updates).
+
+ppm_updates_(Updates) :-
+  aggregate_all(
+    set(update(User,Repo,CurrentVersion,LatestVersion)),
+    ppm_current_update(User, Repo, CurrentVersion, LatestVersion),
+    Updates
+  ).
 
 pp_available_updates([]) :- !,
   format("No updates available.\n").
 pp_available_updates([_]) :- !,
   format("1 update available:\n").
-length(Updates) :-
+pp_available_updates(Updates) :-
   length(Updates, N),
   format("~D updates available:\n", [N]).
 
-ppm_updates_row(update(User,Repo,CurrentVersion,Order,LatestVersion)) :-
+ppm_updates_row(update(User,Repo,CurrentVersion,LatestVersion)) :-
   format("  • ~a/~a\t", [User,Repo]),
+  compare_version(Order, CurrentVersion, LatestVersion),
   order_colors(Order, Color1, Color2),
   phrase(version(CurrentVersion), CurrentCodes),
   ansi_format([fg(Color1)], "~s", [CurrentCodes]),
