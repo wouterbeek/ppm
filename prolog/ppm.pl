@@ -178,14 +178,24 @@ ppm_sync :-
 
 ppm_sync_(Root) :-
   assertz(user:file_search_path(ppm, Root)),
+  current_prolog_flag(arch, Arch),
   forall(
     repository_directory(User, Repo, _),
     (
-      atomic_list_concat([User,Repo,prolog], /, SubDir),
-      directory_by_name(Root, SubDir),
-      assertz(user:file_search_path(library, ppm(SubDir)))
+      (   sync_directory(Root, User, Repo, [prolog], Dir)
+      ->  assertz(user:file_search_path(library, ppm(Dir)))
+      ;   true
+      ),
+      (   sync_directory(Root, User, Repo, [lib,Arch], Dir)
+      ->  assertz(user:file_search_path(foreign, ppm(Dir)))
+      ;   true
+      )
     )
   ).
+
+sync_directory(Root, User, Repo, T, Dir) :-
+  atomic_list_concat([User,Repo|T], /, Dir),
+  directory_by_name(Root, Dir).
 
 
 
